@@ -24,6 +24,10 @@ When the game closes, HDR Auto Pilot can restore the HDR state that was active b
 
 For installed games, an **Override** switch allows the automatic decision to be reversed per game.
 
+<p align="center">
+  <img src="assets/screenshots/Plugin_Main.jpg" width="700" alt="HDR Auto Pilot main view">
+</p>
+
 ---
 
 ## Features
@@ -54,6 +58,19 @@ For installed games, an **Override** switch allows the automatic decision to be 
 | **No data** | No reliable HDR information is currently available | HDR OFF |
 
 The badge also displays the source that supplied the compatibility information.
+
+### Installed games
+
+<table>
+<tr>
+<td width="50%"><strong>HDR</strong><br><img src="assets/screenshots/Game_Installed_HDR.jpg" alt="Installed game with HDR"></td>
+<td width="50%"><strong>No HDR</strong><br><img src="assets/screenshots/Game_Installed_NoHDR.jpg" alt="Installed game without HDR"></td>
+</tr>
+<tr>
+<td width="50%"><strong>Workaround</strong><br><img src="assets/screenshots/Game_Installed_Workaround.jpg" alt="Installed game with HDR workaround"></td>
+<td width="50%"><strong>No data</strong><br><img src="assets/screenshots/Game_Installed_NoData.jpg" alt="Installed game with no HDR data"></td>
+</tr>
+</table>
 
 ---
 
@@ -98,6 +115,10 @@ Override reverses HDR Auto Pilot's normal decision for that specific game.
 
 The displayed HDR badge continues to represent the detected compatibility data. Override changes the launch behavior only.
 
+<p align="center">
+  <img src="assets/screenshots/Game_Installed_Workaround_Override.jpg" width="700" alt="Per-game HDR Override">
+</p>
+
 This is particularly useful for:
 
 - HDR mods
@@ -136,7 +157,11 @@ This allows HDR to be enabled only while it is actually required.
 
 HDR Auto Pilot resolves Steam AppIDs to their corresponding PCGamingWiki entries and normalizes the available HDR information into the plugin's user-facing states.
 
-If PCGamingWiki's AppID redirect endpoint is unavailable or returns an error, HDR Auto Pilot falls back to the public Steam game name and PCGamingWiki's MediaWiki search API. This keeps lazy library lookups working without adding network requests to the launch-critical path.
+If PCGamingWiki's AppID redirect endpoint is unavailable or returns an error, HDR Auto Pilot falls back to Steam's public game metadata and PCGamingWiki's MediaWiki search API.
+
+The resolver progressively broadens title searches when Steam and PCGamingWiki use different game names. Search results are validated against the exact Steam AppID before they are accepted, so title matching is used only for discovery rather than as the final identity check.
+
+This keeps lazy library lookups reliable without adding network requests to the launch-critical path.
 
 ### Steam HDR Curator
 
@@ -180,6 +205,21 @@ Installed games are resolved in the background so their HDR information is alrea
 HDR Auto Pilot also supports games that are in the Steam library but not currently installed.
 
 Opening an uncached game's detail page triggers a lookup automatically. Once resolved, the result becomes part of the local cache.
+
+#### Non-installed library titles
+
+The same compatibility states are available for games that are owned but not currently installed:
+
+<table>
+<tr>
+<td width="50%"><strong>HDR</strong><br><img src="assets/screenshots/Game_NotInstalled_HDR.jpg" alt="Non-installed game with HDR"></td>
+<td width="50%"><strong>No HDR</strong><br><img src="assets/screenshots/Game_NotInstalled_NoHDR.jpg" alt="Non-installed game without HDR"></td>
+</tr>
+<tr>
+<td width="50%"><strong>Workaround</strong><br><img src="assets/screenshots/Game_NotInstalled_Workaround.jpg" alt="Non-installed game with HDR workaround"></td>
+<td width="50%"><strong>No data</strong><br><img src="assets/screenshots/Game_NotInstalled_NoData.jpg" alt="Non-installed game with no HDR data"></td>
+</tr>
+</table>
 
 ### Manual refresh
 
@@ -270,20 +310,12 @@ HDR Auto Pilot currently provides settings for:
 
 Per-game Override selections are stored persistently.
 
----
-
-## Screenshots
-
-Final screenshots for the first public release are currently being prepared.
-
-Planned examples include:
-
-- Native HDR game
-- No HDR game
-- Workaround detected through Steam HDR Curator
-- Per-game Override
-- Plugin settings
-- Cache and refresh view
+<table>
+<tr>
+<td width="50%"><strong>Main settings</strong><br><img src="assets/screenshots/Plugin_Main.jpg" alt="HDR Auto Pilot main settings"></td>
+<td width="50%"><strong>Advanced settings</strong><br><img src="assets/screenshots/Plugin_Advanced.jpg" alt="HDR Auto Pilot advanced settings"></td>
+</tr>
+</table>
 
 ---
 
@@ -305,7 +337,8 @@ Network access is used only to retrieve HDR compatibility metadata.
 <pre>
 hdr-auto-pilot/
 ├── assets/
-│   └── icon.png
+│   ├── icon.png
+│   └── screenshots/
 ├── src/
 │   └── index.tsx
 ├── main.py
