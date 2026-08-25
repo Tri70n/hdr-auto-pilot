@@ -486,6 +486,139 @@ class Plugin:
     # PCGamingWiki resolver
     # ------------------------------------------------------------------
 
+    def _get_steam_game_name(self, appid):
+        params = urllib.parse.urlencode({
+            "appids": appid,
+            "l": "english",
+        })
+
+        url = (
+            "https://store.steampowered.com/"
+            f"api/appdetails?{params}"
+        )
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=15,
+            context=_pcgw_ssl_context(),
+        ) as response:
+            data = json.load(response)
+
+        entry = data.get(appid)
+
+        if not isinstance(entry, dict):
+            return ""
+
+        if entry.get("success") is not True:
+            return ""
+
+        game_data = entry.get("data")
+
+        if not isinstance(game_data, dict):
+            return ""
+
+        return str(
+            game_data.get("name", "")
+        ).strip()
+
+    def _search_pcgw_page(self, game_name, appid=""):
+        if not game_name:
+            return ""
+
+        variants = []
+
+        def add_variant(value):
+            value = " ".join(value.strip().split())
+            if value and value not in variants:
+                variants.append(value)
+
+        add_variant(game_name)
+
+        clean = re.sub(r"[™®©]", "", game_name).strip()
+        add_variant(clean)
+
+        words = clean.split()
+        while len(words) > 1:
+            words = words[:-1]
+            add_variant(" ".join(words))
+
+        for variant in variants:
+            params = urllib.parse.urlencode({
+                "action": "opensearch",
+                "search": variant,
+                "redirects": "resolve",
+                "limit": 10,
+                "format": "json",
+            })
+
+            url = (
+                "https://www.pcgamingwiki.com/"
+                f"w/api.php?{params}"
+            )
+
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                },
+            )
+
+            with urllib.request.urlopen(
+                request,
+                timeout=15,
+                context=_pcgw_ssl_context(),
+            ) as response:
+                data = json.load(response)
+
+            if (
+                not isinstance(data, list)
+                or len(data) < 2
+                or not isinstance(data[1], list)
+            ):
+                continue
+
+            results = [
+                str(value).strip()
+                for value in data[1]
+                if str(value).strip()
+            ]
+
+            if appid:
+                for page in results:
+                    try:
+                        wikitext = self._get_wikitext(page)
+                    except Exception:
+                        continue
+                    if re.search(rf"(?<!\d){re.escape(appid)}(?!\d)", wikitext):
+                        return page
+                continue
+
+            if results:
+                wanted = game_name.casefold()
+                for page in results:
+                    if page.casefold() == wanted:
+                        return page
+                return results[0]
+
+        return ""
+
+        wanted = game_name.casefold()
+
+        for page in results:
+            if page.casefold() == wanted:
+                return page
+
+        return results[0]
+
     def _get_pcgw_page(self, appid):
         url = (
             "https://www.pcgamingwiki.com/api/appid.php"
@@ -517,49 +650,75 @@ class Plugin:
             )
 
         except urllib.error.HTTPError as e:
-            decky.logger.error(
-                f"PCGW STEP 1 HTTP {e.code}: {e.reason}"
-            )
-            decky.logger.error(
-                f"PCGW STEP 1 headers: {dict(e.headers.items())}"
-            )
-            if e.code not in (
+            if e.code in (
                 301,
                 302,
                 303,
                 307,
                 308,
             ):
-                raise
+                location = e.headers.get("Location")
 
-            location = e.headers.get("Location")
+                if not location:
+                    raise RuntimeError(
+                        "PCGamingWiki redirect has no "
+                        "Location header"
+                    )
 
-            if not location:
-                raise RuntimeError(
-                    "PCGamingWiki redirect has no "
-                    "Location header"
+                parsed = urllib.parse.urlparse(
+                    location
                 )
 
-            parsed = urllib.parse.urlparse(
-                location
-            )
+                if not parsed.path.startswith("/wiki/"):
+                    raise RuntimeError(
+                        "Unexpected PCGamingWiki redirect: "
+                        f"{location}"
+                    )
 
-            if not parsed.path.startswith("/wiki/"):
-                raise RuntimeError(
-                    "Unexpected PCGamingWiki redirect: "
-                    f"{location}"
+                page = parsed.path.removeprefix(
+                    "/wiki/"
                 )
 
-            page = parsed.path.removeprefix(
-                "/wiki/"
+                return urllib.parse.unquote(page)
+
+            decky.logger.warning(
+                "PCGW appid.php HTTP %s for %s, "
+                "trying fallback",
+                e.code,
+                appid,
             )
 
-            return urllib.parse.unquote(page)
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+        ) as e:
+            decky.logger.warning(
+                "PCGW appid.php failed for %s: %s",
+                appid,
+                e,
+            )
 
-        raise RuntimeError(
-            "Steam App ID was not redirected "
-            "to a PCGamingWiki page"
-        )
+        try:
+            game_name = self._get_steam_game_name(
+                appid
+            )
+
+            if game_name:
+                page = self._search_pcgw_page(
+                    game_name,
+                    appid,
+                )
+
+                if page:
+                    return page
+
+        except Exception:
+            decky.logger.exception(
+                "PCGW fallback failed for app %s",
+                appid,
+            )
+
+        return ""
 
     def _get_wikitext(self, page):
         params = urllib.parse.urlencode({

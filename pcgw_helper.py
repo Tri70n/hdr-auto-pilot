@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import difflib
 import json
 import re
 import sys
@@ -75,20 +76,69 @@ def get_steam_game_name(appid: str) -> str:
     ).strip()
 
 
-def search_pcgw_page(game_name: str) -> str:
-    """
-    Resolve the canonical PCGamingWiki page name via
-    MediaWiki opensearch.
+PACKAGING_SUFFIXES = (
+    r"game\s+of\s+the\s+year(?:\s+edition)?",
+    r"goty(?:\s+edition)?",
+    r"complete(?:\s+edition)?",
+    r"deluxe(?:\s+edition)?",
+    r"ultimate(?:\s+edition)?",
+    r"gold(?:\s+edition)?",
+    r"premium(?:\s+edition)?",
+    r"special(?:\s+edition)?",
+    r"collector'?s(?:\s+edition)?",
+)
 
-    PCGW documents opensearch as the supported way to
-    find a page name before using action=parse.
-    """
-    if not game_name:
-        return ""
 
+def normalize_title(title: str) -> str:
+    title = title.casefold()
+
+    title = re.sub(
+        r"[™®©]",
+        "",
+        title,
+    )
+
+    title = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        title,
+    )
+
+    return " ".join(
+        title.split()
+    )
+
+
+def title_search_variants(game_name: str) -> list[str]:
+    variants = []
+
+    def add(value: str):
+        value = " ".join(value.strip().split())
+        if value and value not in variants:
+            variants.append(value)
+
+    add(game_name)
+
+    clean = re.sub(r"[™®©]", "", game_name).strip()
+    add(clean)
+
+    words = clean.split()
+
+    # Generic search backoff:
+    # progressively shorten the title from the end.
+    # These variants only discover candidates.
+    # The Steam AppID check decides whether a page is accepted.
+    while len(words) > 1:
+        words = words[:-1]
+        add(" ".join(words))
+
+    return variants
+
+
+def get_pcgw_search_results(query: str) -> list[str]:
     params = urllib.parse.urlencode({
         "action": "opensearch",
-        "search": game_name,
+        "search": query,
         "redirects": "resolve",
         "limit": 10,
         "format": "json",
@@ -117,28 +167,101 @@ def search_pcgw_page(game_name: str) -> str:
         not isinstance(data, list)
         or len(data) < 2
         or not isinstance(data[1], list)
-        or not data[1]
     ):
-        return ""
+        return []
 
-    results = [
+    return [
         str(value).strip()
         for value in data[1]
         if str(value).strip()
     ]
 
-    if not results:
+
+def page_mentions_appid(
+    page: str,
+    appid: str,
+) -> bool:
+    if not appid:
+        return False
+
+    try:
+        wikitext = get_wikitext(page)
+    except Exception:
+        return False
+
+    return bool(
+        re.search(
+            rf"(?<!\d){re.escape(appid)}(?!\d)",
+            wikitext,
+        )
+    )
+
+
+def search_pcgw_page(
+    game_name: str,
+    appid: str = "",
+) -> str:
+    if not game_name:
         return ""
 
-    # Prefer an exact case-insensitive title match.
-    wanted = game_name.casefold()
+    wanted = normalize_title(
+        game_name
+    )
 
-    for page in results:
-        if page.casefold() == wanted:
-            return page
+    candidates = []
 
-    # Otherwise use MediaWiki's highest-ranked result.
-    return results[0]
+    for query in title_search_variants(
+        game_name
+    ):
+        try:
+            results = get_pcgw_search_results(
+                query
+            )
+        except Exception:
+            continue
+
+        for page in results:
+            if page not in candidates:
+                candidates.append(page)
+
+        # Exact normalized title always wins.
+        for page in results:
+            if normalize_title(page) == wanted:
+                return page
+
+        # Strongest general fallback:
+        # the candidate page itself contains this Steam AppID.
+        if appid:
+            for page in results:
+                if page_mentions_appid(
+                    page,
+                    appid,
+                ):
+                    return page
+
+    if not candidates:
+        return ""
+
+    # Conservative final fallback based on title similarity.
+    ranked = sorted(
+        candidates,
+        key=lambda page: difflib.SequenceMatcher(
+            None,
+            wanted,
+            normalize_title(page),
+        ).ratio(),
+        reverse=True,
+    )
+
+    best = ranked[0]
+
+    score = difflib.SequenceMatcher(
+        None,
+        wanted,
+        normalize_title(best),
+    ).ratio()
+
+    return best if score >= 0.82 else ""
 
 
 def get_pcgw_page(appid: str) -> str:
@@ -246,7 +369,8 @@ def get_pcgw_page(appid: str) -> str:
 
     if game_name:
         page = search_pcgw_page(
-            game_name
+            game_name,
+            appid,
         )
 
         if page:
@@ -292,13 +416,6 @@ def get_pcgw_page(appid: str) -> str:
                 game_name,
                 flags=re.IGNORECASE,
             )
-
-            game_name = re.sub(
-                r"\s+Game of the Year$",
-                "",
-                game_name,
-                flags=re.IGNORECASE,
-            ).strip()
 
             if game_name:
                 page = search_pcgw_page(

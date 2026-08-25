@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.16 - 2026-08-25
+
+### Fixed
+
+- Improved PCGamingWiki fallback resolution for Steam titles whose Steam and PCGamingWiki names differ.
+- Added progressive title fallback with exact Steam AppID validation.
+- Fixed HDR detection for Borderlands and Borderlands Game of the Year Enhanced.
+
 ## 0.4.15 - 2026-08-25
 
 ### Fixed
