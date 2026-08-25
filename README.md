@@ -1,67 +1,72 @@
 <p align="center">
-  <img src="assets/icon.png" width="160" alt="HDR Auto Pilot">
+  <img src="assets/icon.png" width="150" alt="HDR Auto Pilot logo">
 </p>
 
 <h1 align="center">HDR Auto Pilot</h1>
 
 <p align="center">
-  Automatic HDR detection and switching for Steam games in Decky Loader.
+  Automatic HDR detection, library status badges, launch-time HDR switching, state restore, and per-game overrides for Steam Game Mode.
 </p>
 
-## What it does
+<p align="center">
+  <strong>Decky Loader plugin · PCGamingWiki + Steam HDR Curator</strong>
+</p>
 
-HDR Auto Pilot takes care of HDR when launching Steam games from Game Mode.
+## Overview
 
-It detects a game's HDR capabilities, displays the result directly on the Steam library detail page, and automatically switches the global HDR state before launch.
+HDR Auto Pilot brings HDR awareness directly into the Steam library.
 
-When the game closes, HDR Auto Pilot can restore the HDR state that was active beforehand.
+It detects a game's HDR capabilities, shows the result on the game detail page, and automatically sets Steam's global HDR state before launch. When the game closes, the previous HDR state can be restored automatically.
+
+For installed games, a per-game **Override** switch can reverse Auto Pilot's decision whenever metadata does not match the desired behavior.
 
 ## Features
 
-- Automatic HDR switching when launching Steam games
-- HDR status directly on Steam library game pages
-- Works with installed and non-installed library titles for HDR information
+- Automatic HDR switching before game launch
+- HDR status badge on Steam library detail pages
+- HDR information for installed and non-installed library titles
 - PCGamingWiki as the primary HDR data source
-- Steam HDR Curator as an additional source for native HDR and known workarounds
-- Persistent local cache to avoid unnecessary network requests
-- Background cache warm-up for installed games
-- Restores the previous HDR state after the game closes
-- Per-game **Override** for installed games
-- Full controller navigation in Steam Game Mode
+- Steam HDR Curator fallback for native HDR and known workarounds
+- Per-game **Override** for installed titles
+- Automatic restoration of the previous HDR state after exit
+- Persistent local cache with background warm-up for installed games
+- No network requests on the launch-critical path
+- Controller-friendly navigation in Steam Game Mode
 
-## HDR status
+## Status badges
 
-HDR Auto Pilot displays one of four states:
+| Badge | Meaning | Auto Pilot default |
+| --- | --- | --- |
+| **HDR** | Native HDR support detected | HDR on |
+| **No HDR** | No native HDR support detected | HDR off |
+| **Workaround** | HDR is available through a known workaround | HDR off |
+| **No data** | No reliable HDR information is available | HDR off |
 
-| Status | Meaning |
-| --- | --- |
-| **HDR** | Native HDR support detected |
-| **No HDR** | No native HDR support detected |
-| **Workaround** | HDR is available through a known workaround |
-| **No data** | No reliable HDR information is currently available |
+The badge also shows which data source supplied the result.
 
-The badge also shows which source supplied the result.
+## Auto Pilot behavior
 
-## Automatic switching
+When HDR Auto Pilot is enabled, the cached HDR result determines the launch-time HDR state:
 
-When HDR Auto Pilot is enabled:
+- **HDR** → HDR enabled
+- **No HDR** → HDR disabled
+- **Workaround** → HDR disabled
+- **No data** → HDR disabled
 
-- **HDR** games launch with HDR enabled.
-- **No HDR**, **No data**, and **Workaround** entries normally launch with HDR disabled.
-- The previous global HDR state can automatically be restored when the game exits.
+The decision is made from local cache data. Game launch never waits for a live network lookup.
 
-HDR decisions are cached before launch. The launch path itself does not perform network requests.
+If **Restore previous HDR state** is enabled, HDR Auto Pilot restores the global HDR state that was active before the game started.
 
 ## Override
 
-Installed games provide an additional Override switch next to the HDR badge.
+Installed games expose an **Override** switch next to the HDR badge.
 
-Override reverses HDR Auto Pilot's normal decision for that game:
+Override reverses Auto Pilot's normal decision for that specific game:
 
-- If Auto Pilot would enable HDR, Override launches the game in SDR.
-- If Auto Pilot would disable HDR, Override launches the game with HDR enabled.
+- Auto Pilot would enable HDR → Override launches in SDR
+- Auto Pilot would disable HDR → Override launches with HDR enabled
 
-This makes it possible to handle games, mods and HDR workarounds that cannot be represented perfectly by metadata alone.
+The displayed badge continues to show the detected data status. Override changes launch behavior only.
 
 ## Data sources
 
@@ -71,32 +76,31 @@ PCGamingWiki is the primary source for HDR capability information.
 
 ### Steam HDR Curator
 
-HDR Auto Pilot also checks the Steam HDR Curator when PCGamingWiki reports no HDR support, no data, or a workaround.
+When PCGamingWiki reports **No HDR**, **No data**, or a workaround, HDR Auto Pilot can consult Steam HDR Curator data as an additional source.
 
-Curator entries can upgrade a result to:
+Curator entries can promote a result to:
 
 - native HDR support
 - known HDR workaround
 
-Windows Auto HDR entries are intentionally not treated as native HDR support.
+Windows Auto HDR entries are intentionally **not** treated as native HDR support.
 
 ## Cache
 
-HDR Auto Pilot maintains a local HDR database to keep library browsing responsive and ensure that game launch decisions never depend on a live network request.
+HDR Auto Pilot maintains local caches to keep library browsing responsive and launches deterministic.
 
-PCGamingWiki results are cached locally.
-
-Steam HDR Curator data uses a separate cache and is refreshed periodically.
-
-The plugin settings include a manual refresh option for installed-game HDR data.
+- PCGamingWiki results are cached locally
+- Steam HDR Curator data uses a separate periodically refreshed cache
+- Installed games are warmed in the background
+- Library titles can be resolved lazily when their detail page is opened
+- Installed-game HDR data can be refreshed manually from plugin settings
 
 ## Requirements
 
 - Steam
 - Decky Loader
-- A Gamescope/Steam Game Mode environment with HDR support
-
-HDR must be supported by the display and system configuration.
+- Steam Game Mode / Gamescope environment with HDR support
+- HDR-capable display and correctly configured system HDR output
 
 ## Installation
 
@@ -106,17 +110,24 @@ A Decky Plugin Store release is planned.
 
 ## Controller navigation
 
-The HDR badge integrates into Steam's controller navigation.
+For installed games:
 
-For installed games, press **Right** from the HDR badge to reach the Override switch and **Left** to return.
+- **Right** from HDR badge → Override
+- **Left** from Override → HDR badge
+- **Down** from Override → Steam settings button
+- **Up** from Steam settings button → Override
 
-External PCGamingWiki pages opened from the badge should be closed with the controller **B** button.
+External PCGamingWiki pages opened from the badge should be closed with controller **B**.
+
+## Screenshots
+
+Final screenshots will be added before release.
 
 ## Privacy
 
 HDR Auto Pilot does not require an account and does not collect personal data.
 
-Network access is used only to retrieve HDR compatibility information from its data sources.
+Network access is used only to retrieve HDR compatibility information.
 
 ## Credits
 
