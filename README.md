@@ -136,6 +136,8 @@ This allows HDR to be enabled only while it is actually required.
 
 HDR Auto Pilot resolves Steam AppIDs to their corresponding PCGamingWiki entries and normalizes the available HDR information into the plugin's user-facing states.
 
+If PCGamingWiki's AppID redirect endpoint is unavailable or returns an error, HDR Auto Pilot falls back to the public Steam game name and PCGamingWiki's MediaWiki search API. This keeps lazy library lookups working without adding network requests to the launch-critical path.
+
 ### Steam HDR Curator
 
 [Steam HDR Curator](https://store.steampowered.com/curator/33286359/) is used as an additional source when PCGamingWiki reports:

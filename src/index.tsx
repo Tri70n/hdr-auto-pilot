@@ -1888,19 +1888,37 @@ function HdrLibraryBadge({
       }
 
       try {
+        console.log(
+          "Decky HDR: lazy library HDR lookup start",
+          appid
+        );
+
         const result =
           await getHdrInfo(appid);
 
-        if (cancelled) {
-          return;
-        }
-
+        /*
+         * Keep a completed lookup even if the user
+         * already navigated away while it was running.
+         */
         pcgwLaunchCache.set(
           appid,
           result
         );
 
-        setInfo(result);
+        notifyPcgwWarmupSubscribers();
+
+        console.log(
+          "Decky HDR: lazy library HDR lookup complete",
+          {
+            appid,
+            hdr: result.hdr,
+            cached: result.cached,
+          }
+        );
+
+        if (!cancelled) {
+          setInfo(result);
+        }
 
       } catch (e) {
         console.warn(
@@ -3057,34 +3075,69 @@ function startHdrLibraryBadgePatch() {
                       ?.appid
                 )?.props?.overview;
 
+              const routeAppId =
+                String(
+                  window.location.pathname
+                    .match(/^\/library\/app\/(\d+)/)?.[1] ?? ""
+                );
+
               const appid =
                 overview?.appid
                   ? String(overview.appid)
-                  : "";
+                  : routeAppId;
 
               if (!appid) {
+                console.warn(
+                  "Decky HDR: library AppID unavailable",
+                  window.location.pathname
+                );
                 return ret;
               }
 
               const children =
                 container.props.children;
 
-              const exists =
-                children.some(
+              /*
+               * HdrLibraryBadge itself has no DOM id.
+               * The old check therefore never detected
+               * the component that we inserted.
+               */
+              const badgeIndex =
+                children.findIndex(
                   (child: any) =>
-                    child?.props?.id ===
-                    "decky-hdr-library-badge"
+                    child?.type ===
+                    HdrLibraryBadge
                 );
 
-              if (!exists) {
+              const badge =
+                <HdrLibraryBadge
+                  key={`decky-hdr-${appid}`}
+                  appid={appid}
+                />;
+
+              if (badgeIndex === -1) {
                 children.splice(
                   1,
                   0,
-                  <HdrLibraryBadge
-                    key={`decky-hdr-${appid}`}
-                    appid={appid}
-                  />
+                  badge
                 );
+
+              } else if (
+                String(
+                  children[
+                    badgeIndex
+                  ]?.props?.appid ?? ""
+                ) !== appid
+              ) {
+                /*
+                 * Steam may reuse the same library route
+                 * while switching from one game to another.
+                 * Replace the old badge so React gets the
+                 * new AppID and key.
+                 */
+                children[
+                  badgeIndex
+                ] = badge;
               }
 
               return ret;

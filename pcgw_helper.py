@@ -26,7 +26,135 @@ class NoRedirect(
         return None
 
 
+def get_steam_game_name(appid: str) -> str:
+    """
+    Resolve the public Steam store name for an AppID.
+
+    This is only used as a fallback when PCGamingWiki's
+    custom appid.php redirect endpoint is unavailable.
+    """
+    params = urllib.parse.urlencode({
+        "appids": appid,
+        "l": "english",
+    })
+
+    url = (
+        "https://store.steampowered.com/"
+        f"api/appdetails?{params}"
+    )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+
+    with urllib.request.urlopen(
+        request,
+        timeout=15,
+    ) as response:
+        data = json.load(response)
+
+    entry = data.get(appid)
+
+    if not isinstance(entry, dict):
+        return ""
+
+    if entry.get("success") is not True:
+        return ""
+
+    game_data = entry.get("data")
+
+    if not isinstance(game_data, dict):
+        return ""
+
+    return str(
+        game_data.get("name", "")
+    ).strip()
+
+
+def search_pcgw_page(game_name: str) -> str:
+    """
+    Resolve the canonical PCGamingWiki page name via
+    MediaWiki opensearch.
+
+    PCGW documents opensearch as the supported way to
+    find a page name before using action=parse.
+    """
+    if not game_name:
+        return ""
+
+    params = urllib.parse.urlencode({
+        "action": "opensearch",
+        "search": game_name,
+        "redirects": "resolve",
+        "limit": 10,
+        "format": "json",
+    })
+
+    url = (
+        "https://www.pcgamingwiki.com/"
+        f"w/api.php?{params}"
+    )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+
+    with urllib.request.urlopen(
+        request,
+        timeout=15,
+    ) as response:
+        data = json.load(response)
+
+    if (
+        not isinstance(data, list)
+        or len(data) < 2
+        or not isinstance(data[1], list)
+        or not data[1]
+    ):
+        return ""
+
+    results = [
+        str(value).strip()
+        for value in data[1]
+        if str(value).strip()
+    ]
+
+    if not results:
+        return ""
+
+    # Prefer an exact case-insensitive title match.
+    wanted = game_name.casefold()
+
+    for page in results:
+        if page.casefold() == wanted:
+            return page
+
+    # Otherwise use MediaWiki's highest-ranked result.
+    return results[0]
+
+
 def get_pcgw_page(appid: str) -> str:
+    """
+    Resolve Steam AppID -> PCGamingWiki page.
+
+    Primary:
+        PCGW custom appid.php redirect API.
+
+    Fallback:
+        Steam public game name -> PCGW MediaWiki opensearch.
+
+    The fallback protects the plugin against failures of
+    PCGW's custom redirect endpoint while keeping the
+    supported MediaWiki parse path unchanged.
+    """
     url = (
         "https://www.pcgamingwiki.com/api/appid.php"
         f"?appid={urllib.parse.quote(appid)}"
@@ -58,46 +186,70 @@ def get_pcgw_page(appid: str) -> str:
             return ""
 
     except urllib.error.HTTPError as e:
-        if e.code not in (
+        if e.code in (
             301,
             302,
             303,
             307,
             308,
         ):
-            raise
-
-        location = e.headers.get(
-            "Location"
-        )
-
-        if not location:
-            raise RuntimeError(
-                "PCGamingWiki returned a redirect "
-                "without Location header."
+            location = e.headers.get(
+                "Location"
             )
 
-        parsed = urllib.parse.urlparse(
-            location
-        )
+            if not location:
+                raise RuntimeError(
+                    "PCGamingWiki returned a redirect "
+                    "without Location header."
+                )
 
-        if not parsed.path.startswith(
-            "/wiki/"
-        ):
-            raise RuntimeError(
-                "Unexpected PCGamingWiki redirect: "
-                f"{location}"
+            parsed = urllib.parse.urlparse(
+                location
             )
 
-        page = parsed.path.removeprefix(
-            "/wiki/"
-        )
+            if not parsed.path.startswith(
+                "/wiki/"
+            ):
+                raise RuntimeError(
+                    "Unexpected PCGamingWiki redirect: "
+                    f"{location}"
+                )
 
-        return urllib.parse.unquote(
-            page
-        )
+            page = parsed.path.removeprefix(
+                "/wiki/"
+            )
 
-    return ""
+            return urllib.parse.unquote(
+                page
+            )
+
+        # The custom appid.php endpoint is only an
+        # optional fast path. It currently returns different
+        # errors for valid Steam AppIDs, including 404 and 500,
+        # while the normal MediaWiki API remains healthy.
+        #
+        # Any non-redirect HTTP error therefore falls through
+        # to the robust Steam-name -> PCGW opensearch resolver.
+        pass
+
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+    ):
+        # Network/path failure of the redirect endpoint.
+        # Give the fallback path a chance.
+        pass
+
+    game_name = get_steam_game_name(
+        appid
+    )
+
+    if not game_name:
+        return ""
+
+    return search_pcgw_page(
+        game_name
+    )
 
 
 def get_wikitext(page: str) -> str:
