@@ -244,12 +244,79 @@ def get_pcgw_page(appid: str) -> str:
         appid
     )
 
-    if not game_name:
-        return ""
+    if game_name:
+        page = search_pcgw_page(
+            game_name
+        )
 
-    return search_pcgw_page(
-        game_name
+        if page:
+            return page
+
+    # Old or delisted games may no longer resolve through
+    # Steam's appdetails API. The public store page can still
+    # expose the game title via its Open Graph metadata.
+    url = (
+        "https://store.steampowered.com/app/"
+        f"{urllib.parse.quote(appid)}/?l=english"
     )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=15,
+        ) as response:
+            html_text = response.read().decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        match = re.search(
+            r'<meta\s+property="og:title"\s+content="([^"]+)"',
+            html_text,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            game_name = match.group(1).strip()
+
+            game_name = re.sub(
+                r"\s+on Steam$",
+                "",
+                game_name,
+                flags=re.IGNORECASE,
+            )
+
+            game_name = re.sub(
+                r"\s+Game of the Year$",
+                "",
+                game_name,
+                flags=re.IGNORECASE,
+            ).strip()
+
+            if game_name:
+                page = search_pcgw_page(
+                    game_name
+                )
+
+                if page:
+                    return page
+
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+    ):
+        pass
+
+    return ""
+
 
 
 def get_wikitext(page: str) -> str:
