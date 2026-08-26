@@ -1216,9 +1216,28 @@ function PcgwLibraryWarmupStatus() {
               installedSteamGames
             );
 
+            /*
+             * The mini-badge runtime has its own completion/queue state.
+             * Clearing PCGW data without resetting that state makes every
+             * library AppID look already finished, so nothing is queued again.
+             * Reuse the existing target snapshot here. Do not rediscover the
+             * library, restart observers, or add any startup work.
+             */
+            dismissHdrMiniBadgeLoadingToast();
+            hdrMiniBadgeQueue.length = 0;
+            hdrMiniBadgeQueuedIds.clear();
+            hdrMiniBadgeCompletedIds.clear();
+            hdrMiniBadgeNotifyNetworkActive = false;
+            hdrMiniBadgeNotifyStartShown = false;
+            for (const appid of hdrMiniBadgeTargetIds) {
+              queueHdrMiniBadgeApp(appid);
+            }
+
             toaster.toast({
               title: "HDR Auto Pilot",
-              body: "Refreshing installed HDR data",
+              body: "Refreshing HDR data",
+              playSound: false,
+              showToast: true,
             });
           }}
         >
@@ -2995,6 +3014,1133 @@ function HdrLibraryBadge({
 }
 
 
+
+/* -------------------------------------------------------------------------
+ * Mini HDR badges + Steam notification preload status
+ * ---------------------------------------------------------------------- */
+
+let hdrMiniBadgeObserver: MutationObserver | null = null;
+let hdrMiniBadgeObservedDocument: Document | null = null;
+let hdrMiniBadgeCheckInterval = 0;
+
+let hdrMiniBadgeProcessedImages =
+  new WeakSet<HTMLImageElement>();
+
+const hdrMiniBadgeQueue: string[] = [];
+
+const hdrMiniBadgeQueuedIds =
+  new Set<string>();
+
+const hdrMiniBadgeTargetIds =
+  new Set<string>();
+
+const hdrMiniBadgeCompletedIds =
+  new Set<string>();
+
+let hdrMiniBadgeQueueRunning = false;
+let hdrMiniBadgeTargetsInitialized = false;
+let hdrMiniBadgeTargetsInitializing = false;
+
+let hdrMiniBadgeNotifyNetworkActive = false;
+let hdrMiniBadgeLoadingToast: ReturnType<typeof toaster.toast> | null = null;
+
+let hdrMiniBadgeLibrarySubscriber:
+  (() => void) | null = null;
+
+
+function getHdrSteamUiDocument():
+  Document | null {
+  try {
+    const popupManager =
+      (globalThis as any).g_PopupManager;
+
+    const popups =
+      Array.from(
+        popupManager?.GetPopups?.() ?? []
+      ) as any[];
+
+    const steamPopup =
+      popups.find(
+        (popup: any) =>
+          popup?.m_strName?.startsWith("SP") &&
+          !popup.m_strName.includes("Keyboard")
+      );
+
+    return (
+      steamPopup?.m_popup?.document ??
+      document ??
+      null
+    );
+
+  } catch {
+    return document ?? null;
+  }
+}
+
+
+function getHdrMiniBadgeAppId(
+  src: string
+): string | null {
+  if (!src) {
+    return null;
+  }
+
+  if (
+    !/library_(?:600x900|capsule)/i.test(src)
+  ) {
+    return null;
+  }
+
+  const modern =
+    src.match(
+      /\/(?:assets|apps)\/(\d+)\//
+    );
+
+  if (modern) {
+    return modern[1];
+  }
+
+  const legacy =
+    src.match(
+      /\/(\d+)_library_(?:600x900|capsule)/i
+    );
+
+  return legacy?.[1] ?? null;
+}
+
+
+function getHdrMiniBadgePresentation(
+  info: HdrInfo
+): {
+  label: string;
+  color: string;
+} {
+  switch (info.hdr) {
+    case "true":
+      return {
+        label: "HDR",
+        color: "#2bea68",
+      };
+
+    case "false":
+    case "n/a":
+      return {
+        label: "NO HDR",
+        color: "#ff4e5f",
+      };
+
+    case "hackable":
+      return {
+        label: "WORKAROUND",
+        color: "#5c8fff",
+      };
+
+    case "unknown":
+    default:
+      return {
+        label: "NO DATA",
+        color: "#7d8792",
+      };
+  }
+}
+
+
+function removeHdrMiniBadge(
+  parent: HTMLElement
+) {
+  parent
+    .querySelectorAll(
+      ".decky-hdr-mini-badge"
+    )
+    .forEach(
+      (badge) => badge.remove()
+    );
+}
+
+
+function renderHdrMiniBadge(
+  img: HTMLImageElement,
+  info: HdrInfo
+) {
+  if (!img.isConnected) {
+    return;
+  }
+
+  const parent =
+    img.parentElement;
+
+  if (!parent) {
+    return;
+  }
+
+  removeHdrMiniBadge(parent);
+
+  const doc =
+    parent.ownerDocument;
+
+  const presentation =
+    getHdrMiniBadgePresentation(info);
+
+  const computed =
+    doc.defaultView
+      ?.getComputedStyle(parent);
+
+  if (
+    !computed ||
+    computed.position === "static"
+  ) {
+    parent.style.position = "relative";
+  }
+
+  const badge =
+    doc.createElement("div");
+
+  badge.className =
+    "decky-hdr-mini-badge";
+
+  badge.title =
+    `${presentation.label} · ${
+      info.source ?? "PCGamingWiki"
+    }`;
+
+  Object.assign(
+    badge.style,
+    {
+      position: "absolute",
+      left: "6px",
+      bottom: "6px",
+      zIndex: "20",
+
+      height: "22px",
+      padding: "0 4px 0 0",
+      borderRadius: "6px",
+
+      display: "flex",
+      alignItems: "stretch",
+
+      background:
+        presentation.color,
+
+      boxShadow:
+        "0 2px 7px rgba(0,0,0,0.42)",
+
+      pointerEvents: "none",
+      overflow: "hidden",
+      boxSizing: "border-box",
+    } as Partial<CSSStyleDeclaration>
+  );
+
+  const body =
+    doc.createElement("div");
+
+  Object.assign(
+    body.style,
+    {
+      height: "22px",
+      padding: "0 7px",
+
+      display: "flex",
+      alignItems: "center",
+      gap: "5px",
+
+      borderRadius: "6px 2px 2px 6px",
+
+      background:
+        "linear-gradient(180deg, rgba(28,32,39,0.99), rgba(12,14,18,0.99))",
+
+      border:
+        "1px solid rgba(255,255,255,0.16)",
+
+      borderRight:
+        "1px solid rgba(255,255,255,0.12)",
+
+      color: "#ffffff",
+      fontSize: "10px",
+      fontWeight: "700",
+      lineHeight: "1",
+      letterSpacing: "0.02em",
+      whiteSpace: "nowrap",
+      boxSizing: "border-box",
+    } as Partial<CSSStyleDeclaration>
+  );
+
+  const dot =
+    doc.createElement("span");
+
+  Object.assign(
+    dot.style,
+    {
+      width: "7px",
+      height: "7px",
+      minWidth: "7px",
+      borderRadius: "50%",
+      background:
+        presentation.color,
+    } as Partial<CSSStyleDeclaration>
+  );
+
+  const text =
+    doc.createElement("span");
+
+  text.textContent =
+    presentation.label;
+
+  body.appendChild(dot);
+  body.appendChild(text);
+
+  badge.appendChild(body);
+
+  parent.appendChild(badge);
+}
+
+
+function renderHdrMiniBadgesForApp(
+  appid: string
+) {
+  const info =
+    pcgwLaunchCache.get(appid);
+
+  if (!info) {
+    return;
+  }
+
+  const doc =
+    getHdrSteamUiDocument();
+
+  if (!doc) {
+    return;
+  }
+
+  doc
+    .querySelectorAll("img")
+    .forEach((node) => {
+      const img =
+        node as HTMLImageElement;
+
+      if (
+        getHdrMiniBadgeAppId(
+          img.src
+        ) === appid
+      ) {
+        renderHdrMiniBadge(
+          img,
+          info
+        );
+      }
+    });
+}
+
+
+async function getHdrAllSteamLibraryIds():
+  Promise<string[]> {
+  const appStore =
+    (window as any).appStore;
+
+  const ids =
+    new Set<string>();
+
+  const addEntries = (
+    entries: any[],
+    requireGameType: boolean
+  ) => {
+    for (const entry of entries) {
+      const numericId =
+        Number(
+          entry?.appid ??
+          entry
+        );
+
+      if (
+        !Number.isInteger(numericId) ||
+        numericId <= 0
+      ) {
+        continue;
+      }
+
+      if (requireGameType) {
+        const appType =
+          entry?.app_type;
+
+        if (
+          appType !== undefined &&
+          appType !== 1
+        ) {
+          continue;
+        }
+      }
+
+      ids.add(
+        String(numericId)
+      );
+    }
+  };
+
+  /*
+   * Primary source: Steam's full owned-app list.
+   * This does not depend on which library tabs
+   * have already been rendered.
+   */
+  try {
+    const steamClient =
+      (window as any).SteamClient;
+
+    if (
+      typeof steamClient
+        ?.Apps
+        ?.GetAllApps === "function"
+    ) {
+      const apps =
+        await steamClient.Apps.GetAllApps();
+
+      if (
+        Array.isArray(apps) &&
+        apps.length > 0
+      ) {
+        for (const entry of apps) {
+          const numericId =
+            Number(
+              entry?.appid ??
+              entry
+            );
+
+          if (
+            !Number.isInteger(numericId) ||
+            numericId <= 0
+          ) {
+            continue;
+          }
+
+          let overview: any = null;
+
+          try {
+            overview =
+              appStore
+                ?.GetAppOverviewByAppID
+                ?.(numericId) ??
+              null;
+          } catch {}
+
+          if (
+            overview?.app_type !== undefined &&
+            overview.app_type !== 1
+          ) {
+            continue;
+          }
+
+          ids.add(
+            String(numericId)
+          );
+        }
+
+        if (ids.size > 0) {
+          console.log(
+            "Decky HDR: full Steam library via GetAllApps",
+            ids.size
+          );
+
+          return Array.from(ids);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "Decky HDR: GetAllApps failed",
+      e
+    );
+  }
+
+  /*
+   * Fallbacks for Steam UI variants.
+   */
+  const collectionStore =
+    (window as any).collectionStore;
+
+  for (const entries of [
+    collectionStore
+      ?.allGamesCollection
+      ?.allApps,
+    collectionStore
+      ?.allAppsCollection
+      ?.allApps,
+    appStore?.allApps,
+  ]) {
+    if (
+      !Array.isArray(entries) ||
+      entries.length === 0
+    ) {
+      continue;
+    }
+
+    ids.clear();
+
+    addEntries(
+      entries,
+      true
+    );
+
+    if (ids.size > 0) {
+      return Array.from(ids);
+    }
+  }
+
+  return [];
+}
+
+
+function dismissHdrMiniBadgeLoadingToast() {
+  if (!hdrMiniBadgeLoadingToast) {
+    return;
+  }
+
+  try {
+    hdrMiniBadgeLoadingToast.dismiss();
+  } catch (e) {
+    console.warn(
+      "Decky HDR: could not dismiss loading toast",
+      e
+    );
+  }
+
+  hdrMiniBadgeLoadingToast = null;
+}
+
+let hdrMiniBadgeNotifyStartShown = false;
+let hdrMiniBadgeGamepadUiActive = true;
+let hdrMiniBadgeUiModeRegistration: { unregister: () => void } | null = null;
+
+function startHdrMiniBadgeUiModeTracking() {
+  void SteamClient.UI.GetUIMode()
+    .then((mode) => {
+      hdrMiniBadgeGamepadUiActive =
+        mode === 4;
+    })
+    .catch((e) => {
+      console.warn(
+        "Decky HDR: could not read Steam UI mode",
+        e
+      );
+    });
+
+  hdrMiniBadgeUiModeRegistration =
+    SteamClient.UI.RegisterForUIModeChanged(
+      (mode) => {
+        hdrMiniBadgeGamepadUiActive =
+          mode === 4;
+      }
+    );
+}
+
+function showHdrMiniBadgeLoadingToast(
+  total: number
+) {
+  if (
+    !hdrMiniBadgeGamepadUiActive ||
+    hdrMiniBadgeNotifyStartShown
+  ) {
+    return;
+  }
+
+  hdrMiniBadgeNotifyStartShown = true;
+
+  toaster.toast({
+    title: "HDR Auto Pilot",
+    body:
+      total === 1
+        ? "Loading HDR data for 1 game"
+        : `Loading HDR data for ${total} games`,
+    playSound: false,
+    showToast: true,
+    duration: 5000,
+  });
+}
+
+function updateHdrMiniBadgeProgress() {
+  const total =
+    hdrMiniBadgeTargetIds.size;
+
+  if (
+    total === 0 ||
+    !hdrMiniBadgeNotifyNetworkActive
+  ) {
+    return;
+  }
+
+
+  /*
+   * The worker state is the authoritative end-of-run signal.
+   * All target AppIDs were queued before processing starts.
+   */
+  const finished =
+    hdrMiniBadgeQueue.length === 0 &&
+    !hdrMiniBadgeQueueRunning;
+
+  if (!finished) {
+    showHdrMiniBadgeLoadingToast(
+      total
+    );
+    return;
+  }
+
+  if (hdrMiniBadgeGamepadUiActive) {
+    toaster.toast({
+      title: "HDR Auto Pilot",
+      body:
+        total === 1
+          ? "HDR data loaded for 1 game"
+          : `HDR data loaded for ${total} games`,
+      playSound: false,
+      showToast: true,
+      duration: 4500,
+    });
+  }
+
+  hdrMiniBadgeNotifyNetworkActive =
+    false;
+
+  hdrMiniBadgeNotifyStartShown = false;
+}
+
+function queueHdrMiniBadgeApp(
+  appid: string
+) {
+  if (
+    !appid ||
+    hdrMiniBadgeCompletedIds.has(
+      appid
+    ) ||
+    hdrMiniBadgeQueuedIds.has(
+      appid
+    )
+  ) {
+    return;
+  }
+
+  if (
+    pcgwLaunchCache.has(appid)
+  ) {
+    hdrMiniBadgeCompletedIds.add(
+      appid
+    );
+
+    renderHdrMiniBadgesForApp(
+      appid
+    );
+
+    updateHdrMiniBadgeProgress();
+    return;
+  }
+
+  hdrMiniBadgeQueuedIds.add(
+    appid
+  );
+
+  hdrMiniBadgeQueue.push(
+    appid
+  );
+
+  void runHdrMiniBadgeQueue();
+}
+
+
+async function initializeHdrMiniBadgeTargets() {
+  if (
+    hdrMiniBadgeTargetsInitialized ||
+    hdrMiniBadgeTargetsInitializing
+  ) {
+    return;
+  }
+
+  hdrMiniBadgeTargetsInitializing =
+    true;
+
+  try {
+    let ids: string[] = [];
+
+    /*
+     * Steam can still be initializing during plugin
+     * startup. Retry a few times rather than locking
+     * in a partial appStore snapshot.
+     */
+    for (
+      let attempt = 0;
+      attempt < 8;
+      attempt += 1
+    ) {
+      ids =
+        await getHdrAllSteamLibraryIds();
+
+      if (ids.length > 0) {
+        break;
+      }
+
+      await sleepPcgwWarmup(
+        500
+      );
+    }
+
+    if (ids.length === 0) {
+      return;
+    }
+
+    hdrMiniBadgeTargetIds.clear();
+
+    for (const appid of ids) {
+      hdrMiniBadgeTargetIds.add(
+        appid
+      );
+    }
+
+    hdrMiniBadgeNotifyNetworkActive =
+      false;
+
+    hdrMiniBadgeTargetsInitialized =
+      true;
+
+    console.log(
+      "Decky HDR: mini badge target library",
+      hdrMiniBadgeTargetIds.size
+    );
+
+    for (const appid of ids) {
+      queueHdrMiniBadgeApp(
+        appid
+      );
+    }
+
+    updateHdrMiniBadgeProgress();
+
+  } finally {
+    hdrMiniBadgeTargetsInitializing =
+      false;
+  }
+}
+
+
+async function runHdrMiniBadgeQueue() {
+  if (hdrMiniBadgeQueueRunning) {
+    return;
+  }
+
+  hdrMiniBadgeQueueRunning = true;
+
+  try {
+    while (
+      hdrMiniBadgeQueue.length > 0
+    ) {
+      const appid =
+        hdrMiniBadgeQueue.shift();
+
+      if (!appid) {
+        continue;
+      }
+
+      let networkFetch = false;
+
+      try {
+        let info =
+          pcgwLaunchCache.get(appid);
+
+        if (!info) {
+          info =
+            await getHdrInfo(appid);
+
+
+          networkFetch =
+            !info.cached;
+
+          if (
+            networkFetch &&
+            !hdrMiniBadgeNotifyNetworkActive
+          ) {
+            hdrMiniBadgeNotifyNetworkActive = true;
+            showHdrMiniBadgeLoadingToast(
+              hdrMiniBadgeTargetIds.size
+            );
+          }
+
+          pcgwLaunchCache.set(
+            appid,
+            info
+          );
+
+          notifyPcgwWarmupSubscribers();
+        }
+
+        hdrMiniBadgeCompletedIds.add(
+          appid
+        );
+
+        renderHdrMiniBadgesForApp(
+          appid
+        );
+
+      } catch (e) {
+        console.warn(
+          "Decky HDR: mini badge lookup failed",
+          appid,
+          e
+        );
+
+        hdrMiniBadgeCompletedIds.add(
+          appid
+        );
+
+      } finally {
+        hdrMiniBadgeQueuedIds.delete(
+          appid
+        );
+
+        updateHdrMiniBadgeProgress();
+      }
+
+      if (
+        networkFetch &&
+        hdrMiniBadgeQueue.length > 0
+      ) {
+        await sleepPcgwWarmup(
+          2200
+        );
+      }
+    }
+
+  } finally {
+    hdrMiniBadgeQueueRunning = false;
+
+    if (
+      hdrMiniBadgeQueue.length > 0
+    ) {
+      void runHdrMiniBadgeQueue();
+    } else {
+      updateHdrMiniBadgeProgress();
+    }
+  }
+}
+
+
+function processHdrMiniBadgeImage(
+  img: HTMLImageElement
+) {
+  if (
+    hdrMiniBadgeProcessedImages.has(
+      img
+    )
+  ) {
+    return;
+  }
+
+  hdrMiniBadgeProcessedImages.add(
+    img
+  );
+
+  const appid =
+    getHdrMiniBadgeAppId(
+      img.src
+    );
+
+  if (!appid) {
+    return;
+  }
+
+  const cached =
+    pcgwLaunchCache.get(appid);
+
+  if (cached) {
+    renderHdrMiniBadge(
+      img,
+      cached
+    );
+
+    return;
+  }
+
+  /*
+   * Do not expand the progress denominator from
+   * DOM discovery. The owned-library target list
+   * is established separately and remains stable.
+   */
+  if (
+    hdrMiniBadgeTargetIds.has(appid)
+  ) {
+    queueHdrMiniBadgeApp(
+      appid
+    );
+  }
+}
+
+
+function scanHdrMiniBadgeImages(
+  doc: Document | null =
+    getHdrSteamUiDocument()
+) {
+  if (!doc) {
+    return;
+  }
+
+  doc
+    .querySelectorAll("img")
+    .forEach(
+      (node) =>
+        processHdrMiniBadgeImage(
+          node as HTMLImageElement
+        )
+    );
+}
+
+
+function handleHdrMiniBadgeMutations(
+  mutations: MutationRecord[]
+) {
+  for (
+    const mutation of mutations
+  ) {
+    if (
+      mutation.type ===
+      "childList"
+    ) {
+      for (
+        const node of
+        mutation.addedNodes
+      ) {
+        /*
+         * Realm-safe checks. Steam may create the
+         * library DOM in another popup window.
+         */
+        if (
+          node.nodeType !== 1
+        ) {
+          continue;
+        }
+
+        const element =
+          node as HTMLElement;
+
+        if (
+          element.tagName === "IMG"
+        ) {
+          processHdrMiniBadgeImage(
+            element as
+              HTMLImageElement
+          );
+
+        } else {
+          element
+            .querySelectorAll("img")
+            .forEach(
+              (img) =>
+                processHdrMiniBadgeImage(
+                  img as
+                    HTMLImageElement
+                )
+            );
+        }
+      }
+
+    } else if (
+      mutation.type ===
+        "attributes" &&
+      mutation.attributeName ===
+        "src"
+    ) {
+      const target =
+        mutation.target as
+          HTMLElement;
+
+      if (
+        target?.nodeType === 1 &&
+        target.tagName === "IMG"
+      ) {
+        const img =
+          target as
+            HTMLImageElement;
+
+        hdrMiniBadgeProcessedImages
+          .delete(img);
+
+        processHdrMiniBadgeImage(
+          img
+        );
+      }
+    }
+  }
+
+  updateHdrMiniBadgeProgress();
+}
+
+
+function attachHdrMiniBadgeObserver(
+  force = false
+) {
+  const doc =
+    getHdrSteamUiDocument();
+
+  if (!doc?.body) {
+    return;
+  }
+
+  if (
+    !force &&
+    hdrMiniBadgeObservedDocument === doc &&
+    hdrMiniBadgeObserver
+  ) {
+    /*
+     * Cheap safety scan for Steam React remounts.
+     * Cached badges are restored immediately.
+     */
+    scanHdrMiniBadgeImages(doc);
+    updateHdrMiniBadgeProgress();
+    return;
+  }
+
+  hdrMiniBadgeObserver
+    ?.disconnect();
+
+  hdrMiniBadgeObservedDocument =
+    doc;
+
+  hdrMiniBadgeProcessedImages =
+    new WeakSet<HTMLImageElement>();
+
+  const Observer =
+    doc.defaultView
+      ?.MutationObserver ??
+    MutationObserver;
+
+  hdrMiniBadgeObserver =
+    new Observer(
+      handleHdrMiniBadgeMutations
+    );
+
+  scanHdrMiniBadgeImages(doc);
+  updateHdrMiniBadgeProgress();
+
+  hdrMiniBadgeObserver.observe(
+    doc.body,
+    {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    }
+  );
+}
+
+
+function refreshHdrMiniBadges() {
+  /*
+   * Keep existing badges in place. Removing them
+   * before every refresh caused visible flashing
+   * when returning from a game details page.
+   */
+  hdrMiniBadgeProcessedImages =
+    new WeakSet<HTMLImageElement>();
+
+  scanHdrMiniBadgeImages();
+  updateHdrMiniBadgeProgress();
+}
+
+
+function startHdrMiniBadgeRuntime() {
+  void initializeHdrMiniBadgeTargets();
+
+  attachHdrMiniBadgeObserver(
+    true
+  );
+
+  hdrMiniBadgeCheckInterval =
+    window.setInterval(
+      () => {
+        attachHdrMiniBadgeObserver();
+
+        /*
+         * If Steam was not ready at plugin startup,
+         * retry target discovery until it succeeds.
+         */
+        if (
+          !hdrMiniBadgeTargetsInitialized
+        ) {
+          void initializeHdrMiniBadgeTargets();
+        }
+      },
+      500
+    );
+
+  hdrMiniBadgeLibrarySubscriber =
+    () => {
+      refreshHdrMiniBadges();
+    };
+
+  installedLibrarySubscribers.add(
+    hdrMiniBadgeLibrarySubscriber
+  );
+
+  console.log(
+    "Decky HDR: mini library badges ready"
+  );
+}
+
+
+function stopHdrMiniBadgeRuntime() {
+  hdrMiniBadgeObserver
+    ?.disconnect();
+
+  hdrMiniBadgeObserver = null;
+  hdrMiniBadgeObservedDocument = null;
+
+  if (
+    hdrMiniBadgeCheckInterval
+  ) {
+    window.clearInterval(
+      hdrMiniBadgeCheckInterval
+    );
+
+    hdrMiniBadgeCheckInterval = 0;
+  }
+
+
+if (
+    hdrMiniBadgeLibrarySubscriber
+  ) {
+    installedLibrarySubscribers.delete(
+      hdrMiniBadgeLibrarySubscriber
+    );
+
+    hdrMiniBadgeLibrarySubscriber =
+      null;
+  }
+
+  hdrMiniBadgeQueue.length = 0;
+  hdrMiniBadgeQueuedIds.clear();
+  hdrMiniBadgeTargetIds.clear();
+  hdrMiniBadgeCompletedIds.clear();
+
+  hdrMiniBadgeTargetsInitialized =
+    false;
+
+  hdrMiniBadgeTargetsInitializing =
+    false;
+
+  dismissHdrMiniBadgeLoadingToast();
+
+  hdrMiniBadgeNotifyNetworkActive =
+    false;
+
+  const doc =
+    getHdrSteamUiDocument();
+
+  doc
+    ?.querySelectorAll(
+      ".decky-hdr-mini-badge"
+    )
+    .forEach(
+      (badge) => badge.remove()
+    );
+
+  console.log(
+    "Decky HDR: mini library badges stopped"
+  );
+}
+
+
 const HDR_LIBRARY_ROUTE =
   "/library/app/:appid";
 
@@ -3433,6 +4579,8 @@ export default definePlugin(() => {
   startSteamLaunchRuntime();
   startInstalledLibraryRuntime();
   startHdrLibraryBadgePatch();
+  startHdrMiniBadgeUiModeTracking();
+  startHdrMiniBadgeRuntime();
   void refreshRuntimeHdrSettings();
 
   return {
@@ -3453,6 +4601,9 @@ export default definePlugin(() => {
     icon: <FaTv />,
 
     onDismount() {
+      hdrMiniBadgeUiModeRegistration?.unregister();
+      hdrMiniBadgeUiModeRegistration = null;
+      stopHdrMiniBadgeRuntime();
       stopHdrLibraryBadgePatch();
       stopInstalledLibraryRuntime();
       stopSteamLaunchRuntime();

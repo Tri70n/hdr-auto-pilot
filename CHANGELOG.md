@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.17 - 2026-08-26
+
+### Added
+
+- Added compact HDR status badges to Steam library capsules for installed and non-installed games.
+- Added mini badge states for HDR, No HDR, Workaround, and No Data.
+- Added full-library HDR data preloading for Steam library games.
+- Added Game Mode notifications when HDR data loading starts and finishes.
+
+### Changed
+
+- Mini badges now reuse cached PCGamingWiki HDR results across the Steam library.
+- Mini badge rendering now handles Steam library re-renders and recycled capsule artwork.
+- HDR loading notifications are suppressed in Steam Desktop mode.
+- Loading progress notifications were simplified to one start notification and one completion notification.
+
 ## 0.4.16 - 2026-08-25
 
 ### Fixed
