@@ -70,7 +70,9 @@ HDR Auto Pilot displays the detected HDR state directly on Steam library capsule
 
 ### Game detail badges
 
-The larger game detail badge also shows the source that supplied the compatibility information.
+HDR Auto Pilot also displays a larger HDR status badge on Steam game detail pages.
+
+For **installed games**, the badge is shown together with the per-game **Override** control:
 
 <table>
 <tr>
@@ -83,7 +85,20 @@ The larger game detail badge also shows the source that supplied the compatibili
 </tr>
 </table>
 
-The same compatibility states are available for non-installed library titles.
+For **non-installed games**, the same HDR states are shown without the Override control:
+
+<table>
+<tr>
+<td width="50%"><strong>HDR</strong><br><img src="assets/screenshots/Game_NotInstalled_HDR.jpg" alt="Non-installed game with HDR"></td>
+<td width="50%"><strong>No HDR</strong><br><img src="assets/screenshots/Game_NotInstalled_NoHDR.jpg" alt="Non-installed game without HDR"></td>
+</tr>
+<tr>
+<td width="50%"><strong>Workaround</strong><br><img src="assets/screenshots/Game_NotInstalled_Workaround.jpg" alt="Non-installed game with HDR workaround"></td>
+<td width="50%"><strong>No data</strong><br><img src="assets/screenshots/Game_NotInstalled_NoData.jpg" alt="Non-installed game with no HDR data"></td>
+</tr>
+</table>
+
+The detail badge also shows the source that supplied the compatibility information.
 
 ---
 
