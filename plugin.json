@@ -1,9 +1,7 @@
 {
   "name": "HDR Auto Pilot",
   "author": "Nils",
-  "flags": [
-    "debug"
-  ],
+  "flags": [],
   "api_version": 1,
   "publish": {
     "tags": [
@@ -12,6 +10,6 @@
       "library",
       "automation"
     ],
-    "description": "Automatically switches HDR for Steam games using PCGamingWiki data and displays HDR support in the library."
+    "description": "Automatically switches HDR for Steam games using PCGamingWiki and Steam HDR Curator data, with HDR status badges directly in the Steam library."
   }
 }

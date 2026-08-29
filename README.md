@@ -227,23 +227,50 @@ Per-game Override selections and plugin settings are stored persistently.
 - Linux-based Steam Game Mode system
 - Steam
 - Decky Loader
-- Steam Game Mode / Gamescope
+- Gamescope
+- `gamescopectl` with `hdr_enabled` support
 - HDR-capable display
 - Working HDR output in the host system
-
-HDR Auto Pilot is designed for SteamOS-style Linux gaming systems such as **Bazzite** and **SteamOS**. Windows and macOS are not supported.
 
 HDR Auto Pilot controls the HDR state exposed by the Steam / Gamescope environment.
 
 It does **not** convert SDR games into HDR.
 
+### Non-Steam games
+
+Version **0.4.19 supports regular Steam games with a valid Steam AppID only**.
+
+Games added to Steam as **Non-Steam games** are not currently supported. HDR compatibility lookup, PCGamingWiki links, library mini badges, and automatic HDR switching may therefore be unavailable or incomplete for these entries.
+
+Full Non-Steam game support is planned for the next release.
+
+### Platform compatibility
+
+| Platform | Gamescope / Game Mode | HDR Auto Pilot status |
+| --- | --- | --- |
+| **Bazzite** | Yes | **Verified** |
+| **SteamOS** | Yes | **Supported target platform** |
+| **CachyOS Game Mode** | Available | Expected to work, not yet tested |
+| **ChimeraOS** | Yes | Expected to work, not yet tested |
+| **Nobara Steam/Game Mode** | Available | Expected to work, not yet tested |
+
+Compatibility requires a working Decky Loader environment and a `gamescopectl` implementation that supports reading and changing `hdr_enabled`.
+
+The plugin contains no Bazzite-specific user paths, fixed user IDs, or fixed Gamescope session names. Runtime Gamescope sessions are detected dynamically.
+
+Windows and macOS are not supported.
+
 ---
 
 ## Installation
 
-HDR Auto Pilot is currently distributed as a Decky plugin ZIP package.
+HDR Auto Pilot is distributed independently through this GitHub repository.
 
-Official Decky Plugin Store distribution is planned.
+The plugin can be installed manually in Decky Loader using a release package.
+
+Normal installation is handled entirely through Decky Loader. No root access or manual `sudo` commands are required.
+
+HDR Auto Pilot is currently **not distributed through the official Decky Plugin Store**.
 
 ### Development build
 

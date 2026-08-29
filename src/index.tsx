@@ -3616,6 +3616,29 @@ function startHdrMiniBadgeUiModeTracking() {
       (mode) => {
         hdrMiniBadgeGamepadUiActive =
           mode === 4;
+
+        /*
+         * A preload may have started while Steam was in
+         * Desktop mode, where notifications are intentionally
+         * suppressed. If it is still running when the user
+         * enters Game Mode, show the loading notification there.
+         */
+        if (
+          hdrMiniBadgeGamepadUiActive &&
+          hdrMiniBadgeNotifyNetworkActive &&
+          !hdrMiniBadgeNotifyStartShown
+        ) {
+          const total =
+            hdrMiniBadgeNotifyTotal > 0
+              ? hdrMiniBadgeNotifyTotal
+              : hdrMiniBadgeTargetIds.size;
+
+          if (total > 0) {
+            showHdrMiniBadgeLoadingToast(
+              total
+            );
+          }
+        }
       }
     );
 }

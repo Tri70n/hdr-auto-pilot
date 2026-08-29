@@ -14,12 +14,12 @@ import urllib.request
 import decky
 
 
-USER_AGENT = "DeckyHDR/0.1 (local development)"
+USER_AGENT = "HDR-Auto-Pilot (Decky Loader plugin)"
 CACHE_MAX_AGE = 30 * 24 * 60 * 60
 STEAM_HDR_CURATOR_CACHE_MAX_AGE = 7 * 24 * 60 * 60
 
 DEFAULT_SETTINGS = {
-    "auto_hdr_enabled": False,
+    "auto_hdr_enabled": True,
     "restore_previous_hdr_state": True,
     "mini_badges_enabled": True,
     "mini_badges_library_enabled": True,
@@ -1033,29 +1033,47 @@ class Plugin:
                 None,
             )
 
-        helper_env["PATH"] = (
+        system_path = (
             "/usr/local/bin:"
             "/usr/bin:"
             "/bin"
         )
 
-        helper_env["SSL_CERT_FILE"] = (
-            "/etc/pki/tls/cert.pem"
+        helper_env["PATH"] = system_path
+
+        python_executable = shutil.which(
+            "python3",
+            path=system_path,
         )
 
-        helper_env["SSL_CERT_DIR"] = (
-            "/etc/pki/tls/certs"
+        if not python_executable:
+            raise RuntimeError(
+                "System Python 3 was not found."
+            )
+
+        # Do not force distro-specific SSL_CERT_FILE or
+        # SSL_CERT_DIR values here. The isolated system
+        # Python should use its distribution's normal
+        # certificate configuration.
+        helper_env.pop(
+            "SSL_CERT_FILE",
+            None,
+        )
+        helper_env.pop(
+            "SSL_CERT_DIR",
+            None,
         )
 
         decky.logger.info(
-            "PCGW helper runtime: "
-            "/usr/bin/python3 with sanitized environment"
+            "PCGW helper runtime: %s "
+            "with sanitized environment",
+            python_executable,
         )
 
         try:
             completed = subprocess.run(
                 [
-                    "/usr/bin/python3",
+                    python_executable,
                     "-I",
                     helper,
                     appid,

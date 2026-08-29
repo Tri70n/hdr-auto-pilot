@@ -67,3 +67,4 @@ src/index.tsx.before-*
 
 # Temporary: replace with final store/GitHub screenshots before release
 assets/screenshots/
+release/

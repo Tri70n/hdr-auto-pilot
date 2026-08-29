@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 
 
-USER_AGENT = "DeckyHDR/0.1 (local development)"
+USER_AGENT = "HDR-Auto-Pilot (Decky Loader plugin)"
 
 
 class NoRedirect(
