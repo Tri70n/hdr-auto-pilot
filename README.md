@@ -33,7 +33,8 @@ For installed games, a per-game **Override** can reverse the automatic launch de
 - HDR status badges on Steam game detail pages
 - Compact HDR status badges directly on Steam library capsules
 - HDR information for installed and non-installed Steam games
-- Full-library background HDR compatibility preload
+- Background HDR compatibility preload for the full Steam library
+- Automatic detection and preload of newly added Steam games
 - PCGamingWiki as the primary HDR data source
 - Steam HDR Curator as an additional compatibility source
 - Per-game **Override** for installed titles
@@ -41,7 +42,6 @@ For installed games, a per-game **Override** can reverse the automatic launch de
 - Persistent local compatibility cache
 - Manual HDR data refresh
 - No live network requests on the launch-critical path
-- Controller-friendly Steam Game Mode integration
 
 ---
 
