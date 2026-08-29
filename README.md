@@ -25,10 +25,6 @@ It detects HDR support for Steam games, displays HDR status directly in the libr
 
 For installed games, a per-game **Override** can reverse the automatic launch decision.
 
-<p align="center">
-  <img src="assets/screenshots/Plugin_Main.jpg" width="700" alt="HDR Auto Pilot main view">
-</p>
-
 ---
 
 ## Features
@@ -206,21 +202,6 @@ HDR compatibility data can be refreshed manually through the plugin settings.
 
 ---
 
-## Controller navigation
-
-The library integration is designed for Steam Game Mode and controller use.
-
-For installed games:
-
-- **Right** from HDR badge → Override
-- **Left** from Override → HDR badge
-- **Down** from Override → Steam settings button
-- **Up** from Steam settings button → Override
-
-External compatibility pages opened from the badge can be closed with controller **B**.
-
----
-
 ## Plugin settings
 
 HDR Auto Pilot currently provides settings for:
@@ -243,7 +224,7 @@ Per-game Override selections and plugin settings are stored persistently.
 
 ## Requirements
 
-- Linux
+- Linux-based Steam Game Mode system
 - Steam
 - Decky Loader
 - Steam Game Mode / Gamescope
