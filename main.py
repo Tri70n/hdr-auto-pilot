@@ -21,6 +21,9 @@ STEAM_HDR_CURATOR_CACHE_MAX_AGE = 7 * 24 * 60 * 60
 DEFAULT_SETTINGS = {
     "auto_hdr_enabled": False,
     "restore_previous_hdr_state": True,
+    "mini_badges_enabled": True,
+    "mini_badges_library_enabled": True,
+    "mini_badges_home_enabled": True,
     "override_appids": [],
 }
 
@@ -91,6 +94,18 @@ class Plugin:
 
         settings["restore_previous_hdr_state"] = bool(
             settings["restore_previous_hdr_state"]
+        )
+
+        settings["mini_badges_enabled"] = bool(
+            settings["mini_badges_enabled"]
+        )
+
+        settings["mini_badges_library_enabled"] = bool(
+            settings["mini_badges_library_enabled"]
+        )
+
+        settings["mini_badges_home_enabled"] = bool(
+            settings["mini_badges_home_enabled"]
         )
 
         override_appids = settings.get(
@@ -170,6 +185,30 @@ class Plugin:
             self.settings["restore_previous_hdr_state"],
         )
 
+        return dict(self.settings)
+
+    async def set_mini_badges_enabled(
+        self,
+        enabled: bool,
+    ):
+        self.settings["mini_badges_enabled"] = bool(enabled)
+        self._save_settings()
+        return dict(self.settings)
+
+    async def set_mini_badges_library_enabled(
+        self,
+        enabled: bool,
+    ):
+        self.settings["mini_badges_library_enabled"] = bool(enabled)
+        self._save_settings()
+        return dict(self.settings)
+
+    async def set_mini_badges_home_enabled(
+        self,
+        enabled: bool,
+    ):
+        self.settings["mini_badges_home_enabled"] = bool(enabled)
+        self._save_settings()
         return dict(self.settings)
 
     async def set_hdr_override_for_app(

@@ -51,6 +51,9 @@ type HdrInfo = {
 type PluginSettings = {
   auto_hdr_enabled: boolean;
   restore_previous_hdr_state: boolean;
+  mini_badges_enabled: boolean;
+  mini_badges_library_enabled: boolean;
+  mini_badges_home_enabled: boolean;
   override_appids: string[];
 };
 
@@ -88,6 +91,27 @@ const setRestorePreviousHdrState =
     [enabled: boolean],
     PluginSettings
   >("set_restore_previous_hdr_state");
+
+
+const setMiniBadgesEnabled =
+  callable<
+    [enabled: boolean],
+    PluginSettings
+  >("set_mini_badges_enabled");
+
+
+const setMiniBadgesLibraryEnabled =
+  callable<
+    [enabled: boolean],
+    PluginSettings
+  >("set_mini_badges_library_enabled");
+
+
+const setMiniBadgesHomeEnabled =
+  callable<
+    [enabled: boolean],
+    PluginSettings
+  >("set_mini_badges_home_enabled");
 
 
 const setHdrOverrideForApp =
@@ -159,6 +183,10 @@ function getSteamWebpackRequire(): any | null {
 
 let runtimeAutoHdrEnabled = false;
 
+let runtimeMiniBadgesEnabled = true;
+let runtimeMiniBadgesLibraryEnabled = true;
+let runtimeMiniBadgesHomeEnabled = true;
+
 let runtimeHdrOverrideAppIds =
   new Set<string>();
 
@@ -196,6 +224,15 @@ async function refreshRuntimeHdrSettings() {
 
     runtimeAutoHdrEnabled =
       !!settings.auto_hdr_enabled;
+
+    runtimeMiniBadgesEnabled =
+      settings.mini_badges_enabled !== false;
+
+    runtimeMiniBadgesLibraryEnabled =
+      settings.mini_badges_library_enabled !== false;
+
+    runtimeMiniBadgesHomeEnabled =
+      settings.mini_badges_home_enabled !== false;
 
     runtimeHdrOverrideAppIds =
       new Set(
@@ -3040,8 +3077,11 @@ const hdrMiniBadgeCompletedIds =
 let hdrMiniBadgeQueueRunning = false;
 let hdrMiniBadgeTargetsInitialized = false;
 let hdrMiniBadgeTargetsInitializing = false;
+let hdrMiniBadgeLibraryRefreshRunning = false;
+let hdrMiniBadgeLibraryRefreshPending = false;
 
 let hdrMiniBadgeNotifyNetworkActive = false;
+let hdrMiniBadgeNotifyTotal = 0;
 let hdrMiniBadgeLoadingToast: ReturnType<typeof toaster.toast> | null = null;
 
 let hdrMiniBadgeLibrarySubscriber:
@@ -3158,11 +3198,61 @@ function removeHdrMiniBadge(
 }
 
 
+function removeAllHdrMiniBadges() {
+  const doc =
+    getHdrSteamUiDocument();
+
+  doc
+    ?.querySelectorAll(
+      ".decky-hdr-mini-badge"
+    )
+    .forEach(
+      (badge) => badge.remove()
+    );
+}
+
+
+function hdrMiniBadgesEnabledForCurrentLocation(): boolean {
+  if (!runtimeMiniBadgesEnabled) {
+    return false;
+  }
+
+  const pathname =
+    window.location.pathname;
+
+  const isHome =
+    /^\/routes\/library\/home\/?$/i.test(
+      pathname
+    );
+
+  if (isHome) {
+    return runtimeMiniBadgesHomeEnabled;
+  }
+
+  const isLibrary =
+    /^\/routes\/library(?:\/|$)/i.test(
+      pathname
+    );
+
+  if (isLibrary) {
+    return runtimeMiniBadgesLibraryEnabled;
+  }
+
+  return false;
+}
+
+
 function renderHdrMiniBadge(
   img: HTMLImageElement,
   info: HdrInfo
 ) {
   if (!img.isConnected) {
+    return;
+  }
+
+  if (
+    !hdrMiniBadgesEnabledForCurrentLocation()
+  ) {
     return;
   }
 
@@ -3556,7 +3646,9 @@ function showHdrMiniBadgeLoadingToast(
 
 function updateHdrMiniBadgeProgress() {
   const total =
-    hdrMiniBadgeTargetIds.size;
+    hdrMiniBadgeNotifyTotal > 0
+      ? hdrMiniBadgeNotifyTotal
+      : hdrMiniBadgeTargetIds.size;
 
   if (
     total === 0 ||
@@ -3596,6 +3688,8 @@ function updateHdrMiniBadgeProgress() {
 
   hdrMiniBadgeNotifyNetworkActive =
     false;
+
+  hdrMiniBadgeNotifyTotal = 0;
 
   hdrMiniBadgeNotifyStartShown = false;
 }
@@ -3639,6 +3733,74 @@ function queueHdrMiniBadgeApp(
   );
 
   void runHdrMiniBadgeQueue();
+}
+
+
+async function refreshHdrMiniBadgeLibraryTargets() {
+  if (!hdrMiniBadgeTargetsInitialized) {
+    return;
+  }
+
+  if (hdrMiniBadgeLibraryRefreshRunning) {
+    hdrMiniBadgeLibraryRefreshPending = true;
+    return;
+  }
+
+  hdrMiniBadgeLibraryRefreshRunning = true;
+
+  try {
+    do {
+      hdrMiniBadgeLibraryRefreshPending = false;
+
+      const ids =
+        await getHdrAllSteamLibraryIds();
+
+      if (ids.length === 0) {
+        continue;
+      }
+
+      const added =
+        ids.filter(
+          (appid) =>
+            !hdrMiniBadgeTargetIds.has(appid)
+        );
+
+      if (added.length === 0) {
+        continue;
+      }
+
+      hdrMiniBadgeNotifyTotal +=
+        added.length;
+
+      for (const appid of added) {
+        hdrMiniBadgeTargetIds.add(appid);
+        queueHdrMiniBadgeApp(appid);
+      }
+
+      console.log(
+        `Decky HDR: mini badge library delta added=${added.join(",")} total=${hdrMiniBadgeTargetIds.size}`
+      );
+
+      refreshHdrMiniBadges();
+      updateHdrMiniBadgeProgress();
+
+    } while (
+      hdrMiniBadgeLibraryRefreshPending
+    );
+
+  } catch (e) {
+    console.warn(
+      "Decky HDR: mini badge library delta refresh failed",
+      e
+    );
+
+  } finally {
+    hdrMiniBadgeLibraryRefreshRunning = false;
+
+    if (hdrMiniBadgeLibraryRefreshPending) {
+      void refreshHdrMiniBadgeLibraryTargets();
+    }
+  }
 }
 
 
@@ -3747,6 +3909,12 @@ async function runHdrMiniBadgeQueue() {
 
           networkFetch =
             !info.cached;
+
+          if (networkFetch) {
+            console.log(
+              `Decky HDR: mini badge network fetch appid=${appid}`
+            );
+          }
 
           if (
             networkFetch &&
@@ -4067,6 +4235,10 @@ function startHdrMiniBadgeRuntime() {
   hdrMiniBadgeLibrarySubscriber =
     () => {
       refreshHdrMiniBadges();
+
+      if (hdrMiniBadgeTargetsInitialized) {
+        void refreshHdrMiniBadgeLibraryTargets();
+      }
     };
 
   installedLibrarySubscribers.add(
@@ -4119,10 +4291,18 @@ if (
   hdrMiniBadgeTargetsInitializing =
     false;
 
+  hdrMiniBadgeLibraryRefreshRunning =
+    false;
+
+  hdrMiniBadgeLibraryRefreshPending =
+    false;
+
   dismissHdrMiniBadgeLoadingToast();
 
   hdrMiniBadgeNotifyNetworkActive =
     false;
+
+  hdrMiniBadgeNotifyTotal = 0;
 
   const doc =
     getHdrSteamUiDocument();
@@ -4337,6 +4517,9 @@ function Content() {
   ] = useState<PluginSettings>({
     auto_hdr_enabled: false,
     restore_previous_hdr_state: true,
+    mini_badges_enabled: true,
+    mini_badges_library_enabled: true,
+    mini_badges_home_enabled: true,
     override_appids: [],
   });
 
@@ -4461,6 +4644,140 @@ function Content() {
 
 
 
+  const changeMiniBadges =
+    async (enabled: boolean) => {
+      const previous =
+        settings.mini_badges_enabled;
+
+      setSettings((current) => ({
+        ...current,
+        mini_badges_enabled: enabled,
+      }));
+
+      try {
+        const saved =
+          await setMiniBadgesEnabled(
+            enabled
+          );
+
+        runtimeMiniBadgesEnabled =
+          saved.mini_badges_enabled !== false;
+
+        if (runtimeMiniBadgesEnabled) {
+          refreshHdrMiniBadges();
+        } else {
+          removeAllHdrMiniBadges();
+        }
+
+        setSettings(saved);
+
+      } catch (e) {
+        console.error(
+          "Could not save mini badge setting:",
+          e
+        );
+
+        setSettings((current) => ({
+          ...current,
+          mini_badges_enabled: previous,
+        }));
+
+        toaster.toast({
+          title: "HDR Auto Pilot",
+          body: "Could not save setting",
+        });
+      }
+    };
+
+
+  const changeMiniBadgesLibrary =
+    async (enabled: boolean) => {
+      const previous =
+        settings.mini_badges_library_enabled;
+
+      setSettings((current) => ({
+        ...current,
+        mini_badges_library_enabled: enabled,
+      }));
+
+      try {
+        const saved =
+          await setMiniBadgesLibraryEnabled(
+            enabled
+          );
+
+        runtimeMiniBadgesLibraryEnabled =
+          saved.mini_badges_library_enabled !== false;
+
+        removeAllHdrMiniBadges();
+        refreshHdrMiniBadges();
+
+        setSettings(saved);
+
+      } catch (e) {
+        console.error(
+          "Could not save library mini badge setting:",
+          e
+        );
+
+        setSettings((current) => ({
+          ...current,
+          mini_badges_library_enabled:
+            previous,
+        }));
+
+        toaster.toast({
+          title: "HDR Auto Pilot",
+          body: "Could not save setting",
+        });
+      }
+    };
+
+
+  const changeMiniBadgesHome =
+    async (enabled: boolean) => {
+      const previous =
+        settings.mini_badges_home_enabled;
+
+      setSettings((current) => ({
+        ...current,
+        mini_badges_home_enabled: enabled,
+      }));
+
+      try {
+        const saved =
+          await setMiniBadgesHomeEnabled(
+            enabled
+          );
+
+        runtimeMiniBadgesHomeEnabled =
+          saved.mini_badges_home_enabled !== false;
+
+        removeAllHdrMiniBadges();
+        refreshHdrMiniBadges();
+
+        setSettings(saved);
+
+      } catch (e) {
+        console.error(
+          "Could not save Home mini badge setting:",
+          e
+        );
+
+        setSettings((current) => ({
+          ...current,
+          mini_badges_home_enabled:
+            previous,
+        }));
+
+        toaster.toast({
+          title: "HDR Auto Pilot",
+          body: "Could not save setting",
+        });
+      }
+    };
+
+
     return (
     <>
 
@@ -4511,6 +4828,57 @@ function Content() {
             support it, which can cause washed-out or
             incorrect colors.
           </div>
+        </PanelSectionRow>
+      </PanelSection>
+
+
+      <PanelSection title="Badges">
+        <PanelSectionRow>
+          <SettingsToggle
+            title="Mini badges"
+            description={
+              "Show compact HDR status badges on Steam game capsules."
+            }
+            value={
+              settings.mini_badges_enabled
+            }
+            disabled={!settingsLoaded}
+            onChange={changeMiniBadges}
+          />
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <SettingsToggle
+            title="Library"
+            description={
+              "Show mini badges in the Steam Library."
+            }
+            value={
+              settings.mini_badges_library_enabled
+            }
+            disabled={
+              !settingsLoaded ||
+              !settings.mini_badges_enabled
+            }
+            onChange={changeMiniBadgesLibrary}
+          />
+        </PanelSectionRow>
+
+        <PanelSectionRow>
+          <SettingsToggle
+            title="Home"
+            description={
+              "Show mini badges on the Steam Home screen."
+            }
+            value={
+              settings.mini_badges_home_enabled
+            }
+            disabled={
+              !settingsLoaded ||
+              !settings.mini_badges_enabled
+            }
+            onChange={changeMiniBadgesHome}
+          />
         </PanelSectionRow>
       </PanelSection>
 

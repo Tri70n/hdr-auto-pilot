@@ -1,6 +1,6 @@
 {
   "name": "decky-hdr",
-  "version": "0.4.17",
+  "version": "0.4.18",
   "description": "Decky plugin showing HDR support information from PCGamingWiki",
   "type": "module",
   "scripts": {

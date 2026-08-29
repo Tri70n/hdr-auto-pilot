@@ -19,7 +19,7 @@
 
 ## About
 
-**HDR Auto Pilot** is a Decky Loader plugin that integrates HDR compatibility information and automatic HDR switching directly into the Steam Game Mode library.
+**HDR Auto Pilot** is a Decky Loader plugin for Linux-based Steam Game Mode systems that integrates HDR compatibility information and automatic HDR switching directly into the Steam library.
 
 It detects HDR support for Steam games, displays HDR status directly in the library and on game detail pages, automatically configures HDR before launch, and can restore the previous HDR state after the game exits.
 
@@ -194,7 +194,9 @@ Compatibility results are stored locally to avoid unnecessary repeated requests.
 
 HDR Auto Pilot preloads HDR compatibility information for the Steam game library in the background so library badges and launch decisions can use cached data immediately.
 
-Steam Game Mode shows a short notification when a full-library HDR data load starts and another when it finishes.
+Steam Game Mode shows a short notification when HDR data has to be loaded from the network.
+
+After the initial library snapshot, newly added Steam games are detected automatically. Only previously unknown AppIDs are added to the preload queue; existing library entries are not scanned again.
 
 Steam HDR Curator information is stored in a separate persistent cache and refreshed periodically.
 
@@ -225,26 +227,30 @@ HDR Auto Pilot currently provides settings for:
 
 - enabling or disabling automatic HDR switching
 - restoring the previous HDR state after game exit
+- enabling or disabling library mini badges
+- showing mini badges independently on the Game Mode Home screen and in the Library
 - refreshing cached HDR compatibility data
 
-Per-game Override selections are stored persistently.
+The larger game-detail HDR badge and the per-game **Override** control are core plugin features and remain available independently of the mini-badge settings.
 
-<table>
-<tr>
-<td width="50%"><strong>Main settings</strong><br><img src="assets/screenshots/Plugin_Main.jpg" alt="HDR Auto Pilot main settings"></td>
-<td width="50%"><strong>Advanced settings</strong><br><img src="assets/screenshots/Plugin_Advanced.jpg" alt="HDR Auto Pilot advanced settings"></td>
-</tr>
-</table>
+Per-game Override selections and plugin settings are stored persistently.
+
+<p align="center">
+  <img src="assets/screenshots/Plugin_Settings_0418.jpg" width="700" alt="HDR Auto Pilot settings">
+</p>
 
 ---
 
 ## Requirements
 
+- Linux
 - Steam
 - Decky Loader
 - Steam Game Mode / Gamescope
 - HDR-capable display
 - Working HDR output in the host system
+
+HDR Auto Pilot is designed for SteamOS-style Linux gaming systems such as **Bazzite** and **SteamOS**. Windows and macOS are not supported.
 
 HDR Auto Pilot controls the HDR state exposed by the Steam / Gamescope environment.
 
