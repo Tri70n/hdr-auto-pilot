@@ -264,20 +264,16 @@ Windows and macOS are not supported.
 
 ## Installation
 
-HDR Auto Pilot is distributed independently through this GitHub repository.
+HDR Auto Pilot is currently **not distributed through the official Decky Plugin Store**. Install it from a release ZIP through Decky Loader:
 
-The plugin can be installed manually in Decky Loader using a release package.
+1. Install [Decky Loader](https://decky.xyz/) if it is not already installed.
+2. Download the current HDR Auto Pilot release ZIP from the [GitHub Releases page](https://github.com/Tri70n/hdr-auto-pilot/releases).
+3. Open the Decky Loader settings and enable **Developer mode**.
+4. Open the **Developer** section in Decky Loader.
+5. Next to **Install Plugin from ZIP File**, select **Browse**.
+6. Select the downloaded HDR Auto Pilot release ZIP and install it.
 
-Normal installation is handled entirely through Decky Loader. No root access or manual `sudo` commands are required.
-
-HDR Auto Pilot is currently **not distributed through the official Decky Plugin Store**.
-
-### Development build
-
-<pre>
-pnpm install
-pnpm run build
-</pre>
+No terminal commands, `sudo`, or root access are required for normal installation. Do not extract the ZIP manually; select the downloaded ZIP file directly in Decky Loader.
 
 ---
 
