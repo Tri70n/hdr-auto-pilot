@@ -6,7 +6,7 @@
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "test": "node --test tests/auto-hdr-toggle.test.mjs && python3 -B -m unittest discover -s tests -p 'test_auto_hdr_toggle.py'"
+    "test": "node --test tests/auto-hdr-toggle.test.mjs && python3 -B -m unittest discover -s tests -p 'test_*.py'"
   },
   "keywords": [
     "decky",

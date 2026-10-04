@@ -9,7 +9,11 @@ import ts from "typescript";
 const source = readFileSync(new URL("../src/index.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(`${source}
   export const toggleTest = {
-    Content, refreshRuntimeHdrSettings, applyCachedHdrForLaunch, pcgwLaunchCache,
+    Content, refreshRuntimeHdrSettings, applyCachedHdrForLaunch,
+    handleAppLifetimeNotification, stopSteamLaunchRuntime, pcgwLaunchCache,
+    beginHdrCacheClear: typeof beginHdrCacheClear === "function"
+      ? beginHdrCacheClear
+      : () => pcgwLaunchCache.clear(),
   };
 `, {
   fileName: "index.tsx",
@@ -39,19 +43,21 @@ function findToggle(node, title) {
   return children.map((child) => findToggle(child, title)).find(Boolean);
 }
 
-function createHarness(initialEnabled, initialRuntimeRead) {
+function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   let persisted = {
     auto_hdr_enabled: initialEnabled,
     restore_previous_hdr_state: true,
     mini_badges_enabled: true,
     mini_badges_library_enabled: false,
     mini_badges_home_enabled: true,
-    override_appids: [],
+    override_appids: options.overrideAppIds ?? [],
   };
   const initialSettings = { ...persisted };
   const saves = [];
   const hdrWrites = [];
   const toasts = [];
+  const cacheOnlyCalls = [];
+  const networkCalls = [];
   let reads = 0;
   let slots = [];
   let cursor = 0;
@@ -89,6 +95,21 @@ function createHarness(initialEnabled, initialRuntimeRead) {
       definePlugin: (factory) => factory,
       toaster: { toast: (message) => toasts.push(message.body) },
       callable: (name) => (...args) => {
+        if (name === "get_cached_hdr_info") {
+          const [appid] = args;
+          cacheOnlyCalls.push(appid);
+          if (options.cacheOnlyError) {
+            return Promise.reject(options.cacheOnlyError);
+          }
+          if (options.cacheOnlyDeferred) {
+            return options.cacheOnlyDeferred.promise;
+          }
+          return Promise.resolve(options.persistentCache?.[appid] ?? null);
+        }
+        if (name === "get_hdr_info") {
+          networkCalls.push(args[0]);
+          return Promise.reject(new Error("network lookup forbidden on launch path"));
+        }
         if (name === "get_settings") {
           reads += 1;
           return reads === 1 && initialRuntimeRead
@@ -153,7 +174,7 @@ function createHarness(initialEnabled, initialRuntimeRead) {
   }
 
   return {
-    saves, toasts, initialSettings,
+    saves, toasts, initialSettings, cacheOnlyCalls, networkCalls, hdrWrites,
     get persisted() { return persisted; },
     initialize: () => runtime.refreshRuntimeHdrSettings(),
     async mount() {
@@ -171,11 +192,30 @@ function createHarness(initialEnabled, initialRuntimeRead) {
     changeOther: (title, enabled) => findToggle(render(), title).onChange(enabled),
     otherValue: (title) => findToggle(render(), title).value,
     value: () => findToggle(render(), "Automatic HDR switching").value,
-    async assertLaunch(enabled) {
+    clearLaunchCache: () => runtime.pcgwLaunchCache.clear(),
+    setLaunchCache: (appid, info) => runtime.pcgwLaunchCache.set(appid, info),
+    beginCacheClear: () => runtime.beginHdrCacheClear(),
+    stopLaunchRuntime: () => runtime.stopSteamLaunchRuntime(),
+    cachedLaunchInfo: (appid) => runtime.pcgwLaunchCache.get(appid),
+    exitApp: async (appid) => {
+      runtime.handleAppLifetimeNotification({ unAppID: Number(appid), bRunning: false });
+      await flush();
+    },
+    async assertLaunch(enabled, appid = "123") {
       hdrWrites.length = 0;
-      await runtime.applyCachedHdrForLaunch("123");
+      await runtime.applyCachedHdrForLaunch(appid);
       assert.deepEqual(hdrWrites, enabled ? [["gamescope_hdr_enabled", true]] : []);
     },
+    async assertLaunchWrite(expected, appid = "123") {
+      hdrWrites.length = 0;
+      await runtime.applyCachedHdrForLaunch(appid);
+      assert.deepEqual(
+        hdrWrites,
+        expected === null ? [] : [["gamescope_hdr_enabled", expected]]
+      );
+    },
+    clearHdrWrites: () => { hdrWrites.length = 0; },
+    runLaunch: (appid = "123") => runtime.applyCachedHdrForLaunch(appid),
   };
 }
 
@@ -350,4 +390,206 @@ test("another successful setting save preserves a failed Auto HDR toggle's rollb
   assert.equal(h.otherValue("Mini badges"), false);
   assert.equal(h.persisted.auto_hdr_enabled, false);
   await h.assertLaunch(false);
+});
+
+const nativePersistentInfo = {
+  appid: "456",
+  game: "Cached HDR Game",
+  page: "Cached_HDR_Game",
+  hdr: "true",
+  source: "PCGamingWiki",
+  cached: true,
+  automatic_action: "enable",
+};
+
+const sdrPersistentInfo = {
+  ...nativePersistentInfo,
+  hdr: "false",
+  automatic_action: "disable",
+};
+
+test("launch uses a persistent cache hit when the frontend map is empty", async () => {
+  const h = createHarness(true, undefined, {
+    persistentCache: { "456": nativePersistentInfo },
+  });
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(true, "456");
+  assert.deepEqual(h.cacheOnlyCalls, ["456"]);
+  assert.deepEqual(h.networkCalls, []);
+  assert.equal(h.cachedLaunchInfo("456")?.hdr, "true");
+});
+
+test("launch treats a persistent cache miss as SDR without a network lookup", async () => {
+  const h = createHarness(true);
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(false, "456");
+  assert.deepEqual(h.cacheOnlyCalls, ["456"]);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("launch treats a cache-only RPC failure as SDR without a network lookup", async () => {
+  const h = createHarness(true, undefined, {
+    cacheOnlyError: new Error("cache unavailable"),
+  });
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(false, "456");
+  assert.deepEqual(h.cacheOnlyCalls, ["456"]);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("launch keeps using a frontend cache hit without another backend request", async () => {
+  const h = createHarness(true);
+  await h.initialize();
+  await h.assertLaunch(true, "123");
+  assert.deepEqual(h.cacheOnlyCalls, []);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("disabled Auto HDR and unavailable AppIDs do not request any cache or network data", async () => {
+  const disabled = createHarness(false);
+  await disabled.initialize();
+  disabled.clearLaunchCache();
+  await disabled.assertLaunchWrite(null, "456");
+  assert.deepEqual(disabled.cacheOnlyCalls, []);
+  assert.deepEqual(disabled.networkCalls, []);
+
+  const unavailable = createHarness(true);
+  await unavailable.initialize();
+  unavailable.clearLaunchCache();
+  await unavailable.assertLaunchWrite(null, "-");
+  assert.deepEqual(unavailable.cacheOnlyCalls, []);
+  assert.deepEqual(unavailable.networkCalls, []);
+});
+
+test("override still reverses a persistent HDR cache decision", async () => {
+  const h = createHarness(true, undefined, {
+    overrideAppIds: ["456"],
+    persistentCache: { "456": nativePersistentInfo },
+  });
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(false, "456");
+  assert.deepEqual(h.cacheOnlyCalls, ["456"]);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("override can enable HDR from a persistent SDR cache decision", async () => {
+  const h = createHarness(true, undefined, {
+    overrideAppIds: ["456"],
+    persistentCache: { "456": sdrPersistentInfo },
+  });
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(true, "456");
+  assert.deepEqual(h.cacheOnlyCalls, ["456"]);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("game exit while the persistent cache RPC is pending cancels the HDR change", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  h.clearLaunchCache();
+  const launch = h.assertLaunchWrite(null, "456");
+  await flush();
+  await h.exitApp("456");
+  cacheRead.resolve(nativePersistentInfo);
+  await launch;
+  assert.equal(h.cachedLaunchInfo("456"), undefined);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("disabling Auto HDR while the persistent cache RPC is pending cancels the HDR change", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  await h.mount();
+  h.clearLaunchCache();
+  const launch = h.assertLaunchWrite(null, "456");
+  await flush();
+  const disable = h.change(false);
+  cacheRead.resolve(nativePersistentInfo);
+  await launch;
+  assert.equal(h.cachedLaunchInfo("456"), undefined);
+  await flush();
+  h.saves[0].resolve();
+  await disable;
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("clearing the cache while its launch RPC is pending rejects the stale result", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  h.clearLaunchCache();
+  const launch = h.assertLaunchWrite(false, "456");
+  await flush();
+  h.beginCacheClear();
+  cacheRead.resolve(nativePersistentInfo);
+  await launch;
+  assert.equal(h.cachedLaunchInfo("456"), undefined);
+  assert.deepEqual(h.networkCalls, []);
+});
+
+test("persistent cache launch creates one restore context and restores the previous HDR state", async () => {
+  const h = createHarness(true, undefined, {
+    persistentCache: { "456": nativePersistentInfo },
+  });
+  await h.initialize();
+  h.clearLaunchCache();
+  await h.assertLaunchWrite(true, "456");
+  await h.exitApp("456");
+  assert.deepEqual(h.hdrWrites, [
+    ["gamescope_hdr_enabled", true],
+    ["gamescope_hdr_enabled", false],
+  ]);
+  await h.exitApp("456");
+  assert.equal(h.hdrWrites.length, 2);
+});
+
+test("plugin unload while the persistent cache RPC is pending cancels the HDR change", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  h.clearLaunchCache();
+  const launch = h.runLaunch("456");
+  await flush();
+  h.stopLaunchRuntime();
+  cacheRead.resolve(nativePersistentInfo);
+  await launch;
+  assert.deepEqual(h.hdrWrites, []);
+  assert.equal(h.cachedLaunchInfo("456"), undefined);
+});
+
+test("a newer launch for the same AppID supersedes a pending cache lookup", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  h.clearLaunchCache();
+  h.clearHdrWrites();
+  const first = h.runLaunch("456");
+  const second = h.runLaunch("456");
+  await flush();
+  cacheRead.resolve(nativePersistentInfo);
+  await Promise.all([first, second]);
+  assert.deepEqual(h.cacheOnlyCalls, ["456", "456"]);
+  assert.deepEqual(h.hdrWrites, [["gamescope_hdr_enabled", true]]);
+});
+
+test("a frontend cache entry completed during the local RPC is used immediately", async () => {
+  const cacheRead = deferred();
+  const h = createHarness(true, undefined, { cacheOnlyDeferred: cacheRead });
+  await h.initialize();
+  h.clearLaunchCache();
+  h.clearHdrWrites();
+  const launch = h.runLaunch("456");
+  await flush();
+  h.setLaunchCache("456", nativePersistentInfo);
+  cacheRead.resolve(null);
+  await launch;
+  assert.deepEqual(h.hdrWrites, [["gamescope_hdr_enabled", true]]);
+  assert.deepEqual(h.networkCalls, []);
 });

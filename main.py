@@ -1153,6 +1153,21 @@ class Plugin:
 
         return result
 
+    async def get_cached_hdr_info(
+        self,
+        appid: str,
+    ):
+        appid = str(appid).strip()
+        cached = self._get_cached(appid)
+
+        if cached is None:
+            return None
+
+        return self._decorate_result(
+            cached,
+            True,
+        )
+
     async def get_hdr_info(
         self,
         appid: str,

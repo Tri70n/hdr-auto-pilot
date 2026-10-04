@@ -65,6 +65,13 @@ const getHdrInfo =
   >("get_hdr_info");
 
 
+const getCachedHdrInfo =
+  callable<
+    [appid: string],
+    HdrInfo | null
+  >("get_cached_hdr_info");
+
+
 const clearCache =
   callable<
     [],
@@ -215,6 +222,9 @@ type HdrRestoreContext = {
 const hdrRestoreContexts =
   new Map<string, HdrRestoreContext>();
 
+const pendingHdrLaunches =
+  new Map<string, symbol>();
+
 
 function getCurrentSteamHdrState():
   boolean | null {
@@ -349,8 +359,67 @@ async function applyCachedHdrForLaunch(
     return;
   }
 
-  const info =
+  const launchToken = Symbol(appid);
+  pendingHdrLaunches.set(
+    appid,
+    launchToken
+  );
+
+  const cacheRevision =
+    pcgwLaunchCacheRevision;
+
+  let info =
     pcgwLaunchCache.get(appid);
+
+  if (!info) {
+    let cached: HdrInfo | null = null;
+
+    try {
+      cached =
+        await getCachedHdrInfo(appid);
+
+    } catch (e) {
+      console.warn(
+        "Decky HDR: persistent launch cache read failed",
+        appid,
+        e
+      );
+    }
+
+    if (
+      pendingHdrLaunches.get(appid) !== launchToken ||
+      !runtimeAutoHdrEnabled
+    ) {
+      if (
+        pendingHdrLaunches.get(appid) === launchToken
+      ) {
+        pendingHdrLaunches.delete(appid);
+      }
+      return;
+    }
+
+    if (
+      cacheRevision === pcgwLaunchCacheRevision &&
+      cached
+    ) {
+      info = cached;
+      pcgwLaunchCache.set(
+        appid,
+        cached
+      );
+      notifyPcgwWarmupSubscribers();
+    } else if (
+      cacheRevision === pcgwLaunchCacheRevision
+    ) {
+      info = pcgwLaunchCache.get(appid);
+    } else if (
+      cacheRevision !== pcgwLaunchCacheRevision
+    ) {
+      info = pcgwLaunchCache.get(appid);
+    }
+  }
+
+  pendingHdrLaunches.delete(appid);
 
   const previousHdr =
     getCurrentSteamHdrState();
@@ -519,6 +588,8 @@ function handleAppLifetimeNotification(
   );
 
   if (running === false) {
+    pendingHdrLaunches.delete(appid);
+
     void restoreHdrAfterGameExit(
       appid
     );
@@ -852,6 +923,7 @@ function stopSteamLaunchRuntime() {
 
   steamLaunchRegistrations = [];
   steamLaunchRuntimeStarted = false;
+  pendingHdrLaunches.clear();
 
   console.log(
     "Decky HDR: launch runtime stopped"
@@ -861,6 +933,12 @@ function stopSteamLaunchRuntime() {
 
 const pcgwLaunchCache =
   new Map<string, HdrInfo>();
+
+let pcgwLaunchCacheRevision = 0;
+
+function beginHdrCacheClear() {
+  pcgwLaunchCacheRevision += 1;
+}
 
 
 type PcgwWarmupStats = {
@@ -1250,6 +1328,7 @@ function PcgwLibraryWarmupStatus() {
         <ButtonItem
           layout="below"
           onClick={async () => {
+            beginHdrCacheClear();
             await clearCache();
 
             pcgwLaunchCache.clear();
@@ -4992,6 +5071,7 @@ function Content() {
               <ButtonItem
                 layout="below"
                 onClick={async () => {
+                  beginHdrCacheClear();
                   await clearCache();
 
                   toaster.toast({
