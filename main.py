@@ -623,7 +623,10 @@ class Plugin:
                 "",
             )
 
-        elif status == "workaround":
+        elif (
+            status == "workaround"
+            and hdr != "hackable"
+        ):
             result = dict(result)
             result["hdr"] = "hackable"
             result["source"] = "Steam HDR Curator"

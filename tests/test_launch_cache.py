@@ -142,5 +142,55 @@ class LaunchCacheTests(unittest.IsolatedAsyncioTestCase):
         urlopen.assert_not_called()
 
 
+class CuratorPriorityTests(unittest.TestCase):
+    def make_plugin(self):
+        return backend["Plugin"]()
+
+    def test_curator_only_replaces_pcgw_when_it_adds_hdr_information(self):
+        cases = (
+            ("hackable", "workaround", "hackable", "PCGamingWiki"),
+            ("false", "workaround", "hackable", "Steam HDR Curator"),
+            (None, "workaround", "hackable", "Steam HDR Curator"),
+            ("false", "native", "true", "Steam HDR Curator"),
+            (None, "native", "true", "Steam HDR Curator"),
+            ("hackable", "native", "true", "Steam HDR Curator"),
+        )
+
+        for pcgw_hdr, curator_status, expected_hdr, expected_source in cases:
+            with self.subTest(pcgw_hdr=pcgw_hdr, curator_status=curator_status):
+                plugin = self.make_plugin()
+                entry = {
+                    "status": curator_status,
+                    "description": "Curator detail",
+                }
+                with patch.object(
+                    plugin,
+                    "_get_steam_hdr_curator_entries_sync",
+                    return_value={"391220": entry},
+                ) as curator:
+                    pcgw_result = {"appid": "391220"}
+                    if pcgw_hdr is not None:
+                        pcgw_result["hdr"] = pcgw_hdr
+                    result = plugin._apply_steam_hdr_curator_fallback_sync(pcgw_result)
+
+                self.assertEqual(result["hdr"], expected_hdr)
+                self.assertEqual(result["source"], expected_source)
+                curator.assert_called_once_with()
+
+    def test_native_pcgw_result_skips_curator_lookup(self):
+        plugin = self.make_plugin()
+        with patch.object(
+            plugin,
+            "_get_steam_hdr_curator_entries_sync",
+        ) as curator:
+            result = plugin._apply_steam_hdr_curator_fallback_sync(
+                {"appid": "391220", "hdr": "true"}
+            )
+
+        self.assertEqual(result["hdr"], "true")
+        self.assertEqual(result["source"], "PCGamingWiki")
+        curator.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
