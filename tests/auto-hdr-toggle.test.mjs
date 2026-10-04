@@ -40,6 +40,17 @@ const compiled = ts.transpileModule(`${source}
       update: updateHdrMiniBadgeProgress,
       queueApp: queueHdrMiniBadgeApp,
       startUiModeTracking: startHdrMiniBadgeUiModeTracking,
+      stopRuntime: stopHdrMiniBadgeRuntime,
+      state(appid) {
+        return {
+          cached: pcgwLaunchCache.has(appid),
+          completed: hdrMiniBadgeCompletedIds.has(appid),
+          queued: hdrMiniBadgeQueuedIds.has(appid),
+          queueRunning: hdrMiniBadgeQueueRunning,
+          networkActive: hdrMiniBadgeNotifyNetworkActive,
+          notifyTotal: hdrMiniBadgeNotifyTotal,
+        };
+      },
     },
   };
 `, {
@@ -84,6 +95,7 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   const hdrWrites = [];
   const toasts = [];
   const toastMessages = [];
+  const domQueries = [];
   const cacheOnlyCalls = [];
   const networkCalls = [];
   let uiModeHandler;
@@ -151,6 +163,9 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
         }
         if (name === "get_hdr_info") {
           networkCalls.push(args[0]);
+          if (options.networkDeferred) {
+            return options.networkDeferred.promise;
+          }
           if (options.networkResult) {
             return Promise.resolve(options.networkResult);
           }
@@ -214,7 +229,13 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
       return imports[name];
     },
     console: { log() {}, warn() {}, error() {} },
-    document: { body: {}, querySelectorAll: () => [] },
+    document: {
+      body: {},
+      querySelectorAll: (selector) => {
+        domQueries.push(selector);
+        return [];
+      },
+    },
     MutationObserver,
     SteamClient: steamClient,
     window: {
@@ -248,7 +269,7 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   }
 
   return {
-    saves, toasts, toastMessages, initialSettings, cacheOnlyCalls, networkCalls, hdrWrites,
+    saves, toasts, toastMessages, domQueries, initialSettings, cacheOnlyCalls, networkCalls, hdrWrites,
     get persisted() { return persisted; },
     initialize: () => runtime.refreshRuntimeHdrSettings(),
     async mount() {
@@ -767,6 +788,44 @@ test("mini-badge network queue work drives the start and completion toasts", asy
     "HDR data loaded for 1 game",
   ]);
   assert.deepEqual(h.networkCalls, ["1"]);
+});
+
+test("stopping mini-badge runtime invalidates a pending queue lookup", async () => {
+  const network = deferred();
+  const h = createHarness(true, undefined, { networkDeferred: network });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: false,
+    total: 1,
+    targetIds: ["1"],
+    queue: [],
+    queueRunning: false,
+  });
+
+  h.miniBadgeToast.queueApp("1");
+  await flush();
+  assert.deepEqual(h.networkCalls, ["1"]);
+
+  h.miniBadgeToast.stopRuntime();
+  const toastCountAfterStop = h.toastMessages.length;
+  network.resolve({
+    appid: "1",
+    hdr: "true",
+    automatic_action: "enable",
+    cached: false,
+  });
+  await flush();
+
+  assert.deepEqual({ ...h.miniBadgeToast.state("1") }, {
+    cached: false,
+    completed: false,
+    queued: false,
+    queueRunning: false,
+    networkActive: false,
+    notifyTotal: 0,
+  });
+  assert.equal(h.domQueries.includes("img"), false);
+  assert.equal(h.toastMessages.length, toastCountAfterStop);
 });
 
 test("entering Game Mode during a running preload shows the start toast", async () => {

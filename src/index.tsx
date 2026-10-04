@@ -3173,6 +3173,7 @@ const hdrMiniBadgeCompletedIds =
   new Set<string>();
 
 let hdrMiniBadgeQueueRunning = false;
+let hdrMiniBadgeRuntimeGeneration = 0;
 let hdrMiniBadgeTargetsInitialized = false;
 let hdrMiniBadgeTargetsInitializing = false;
 let hdrMiniBadgeLibraryRefreshRunning = false;
@@ -3986,10 +3987,15 @@ async function runHdrMiniBadgeQueue() {
     return;
   }
 
+  const runtimeGeneration =
+    hdrMiniBadgeRuntimeGeneration;
+
   hdrMiniBadgeQueueRunning = true;
 
   try {
     while (
+      runtimeGeneration ===
+        hdrMiniBadgeRuntimeGeneration &&
       hdrMiniBadgeQueue.length > 0
     ) {
       const appid =
@@ -4009,6 +4015,12 @@ async function runHdrMiniBadgeQueue() {
           info =
             await getHdrInfo(appid);
 
+          if (
+            runtimeGeneration !==
+              hdrMiniBadgeRuntimeGeneration
+          ) {
+            return;
+          }
 
           networkFetch =
             !info.cached;
@@ -4046,6 +4058,13 @@ async function runHdrMiniBadgeQueue() {
         );
 
       } catch (e) {
+        if (
+          runtimeGeneration !==
+            hdrMiniBadgeRuntimeGeneration
+        ) {
+          return;
+        }
+
         console.warn(
           "Decky HDR: mini badge lookup failed",
           appid,
@@ -4057,11 +4076,16 @@ async function runHdrMiniBadgeQueue() {
         );
 
       } finally {
-        hdrMiniBadgeQueuedIds.delete(
-          appid
-        );
+        if (
+          runtimeGeneration ===
+            hdrMiniBadgeRuntimeGeneration
+        ) {
+          hdrMiniBadgeQueuedIds.delete(
+            appid
+          );
 
-        updateHdrMiniBadgeProgress();
+          updateHdrMiniBadgeProgress();
+        }
       }
 
       if (
@@ -4071,18 +4095,30 @@ async function runHdrMiniBadgeQueue() {
         await sleepPcgwWarmup(
           2200
         );
+
+        if (
+          runtimeGeneration !==
+            hdrMiniBadgeRuntimeGeneration
+        ) {
+          return;
+        }
       }
     }
 
   } finally {
-    hdrMiniBadgeQueueRunning = false;
-
     if (
-      hdrMiniBadgeQueue.length > 0
+      runtimeGeneration ===
+        hdrMiniBadgeRuntimeGeneration
     ) {
-      void runHdrMiniBadgeQueue();
-    } else {
-      updateHdrMiniBadgeProgress();
+      hdrMiniBadgeQueueRunning = false;
+
+      if (
+        hdrMiniBadgeQueue.length > 0
+      ) {
+        void runHdrMiniBadgeQueue();
+      } else {
+        updateHdrMiniBadgeProgress();
+      }
     }
   }
 }
@@ -4311,6 +4347,8 @@ function refreshHdrMiniBadges() {
 
 
 function startHdrMiniBadgeRuntime() {
+  hdrMiniBadgeRuntimeGeneration += 1;
+
   void initializeHdrMiniBadgeTargets();
 
   attachHdrMiniBadgeObserver(
@@ -4355,6 +4393,9 @@ function startHdrMiniBadgeRuntime() {
 
 
 function stopHdrMiniBadgeRuntime() {
+  hdrMiniBadgeRuntimeGeneration += 1;
+  hdrMiniBadgeQueueRunning = false;
+
   hdrMiniBadgeObserver
     ?.disconnect();
 
