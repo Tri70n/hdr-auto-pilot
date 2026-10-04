@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.20 - 2026-10-04
+
+### Fixed
+
+- Auto HDR setting changes now affect game launches immediately, including safe rollback when saving the setting fails.
+- Game launches can now use valid entries from the persistent HDR cache before the background library preload reaches them, without adding network requests to the launch path.
+
 ## 0.4.19 - 2026-08-29
 
 ### Changed

@@ -168,7 +168,7 @@ HDR Auto Pilot resolves Steam AppIDs to matching PCGamingWiki pages and normaliz
 
 If PCGamingWiki's direct AppID redirect fails, HDR Auto Pilot can fall back to Steam game metadata and PCGamingWiki's MediaWiki search API.
 
-Fallback title matches are validated against the exact Steam AppID before being accepted.
+Fallback search accepts an exact title match first, then a candidate page mentioning the Steam AppID, and finally a sufficiently similar title. Title-based matches are not currently AppID-verified.
 
 ### Steam HDR Curator
 
@@ -188,7 +188,7 @@ A result already identified as native HDR by PCGamingWiki is never downgraded.
 
 Compatibility results are stored locally to avoid unnecessary repeated requests.
 
-HDR Auto Pilot preloads HDR compatibility information for the Steam game library in the background so library badges and launch decisions can use cached data immediately.
+HDR Auto Pilot preloads HDR compatibility information for the Steam game library in the background. Game launches can also read valid entries directly from the persistent local cache before the background preload reaches them, so launch decisions remain available without a live network request.
 
 Steam Game Mode shows a short notification when HDR data has to be loaded from the network.
 
@@ -238,11 +238,11 @@ It does **not** convert SDR games into HDR.
 
 ### Non-Steam games
 
-Version **0.4.19 supports regular Steam games with a valid Steam AppID only**.
+Version **0.4.20 supports regular Steam games with a valid Steam AppID only**.
 
 Games added to Steam as **Non-Steam games** are not currently supported. HDR compatibility lookup, PCGamingWiki links, library mini badges, and automatic HDR switching may therefore be unavailable or incomplete for these entries.
 
-Full Non-Steam game support is planned for the next release.
+Full Non-Steam game support is planned as a single, end-to-end development goal for version **0.4.21**.
 
 ### Platform compatibility
 
