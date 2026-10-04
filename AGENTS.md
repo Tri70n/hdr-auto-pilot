@@ -4,6 +4,7 @@
 - Antworte dem Nutzer immer auf Deutsch.
 - Write all content intended for the public repository or GitHub in English, including README and CHANGELOG content, release notes, commit messages, documentation, code comments, issues, pull requests, and other publicly visible text. Continue communicating with the user in German; their prompts may also be in German.
 - Edit and verify README, CHANGELOG, and other project documentation directly in the normal OpenCode workflow against the actual repository state. Do not prepare documentation outside the repository context and copy it in without verification; first check the current implementation so documentation does not claim unimplemented or removed functionality or retain outdated version or feature information.
+- Bump version numbers during release preparation, not for every push. Collect user-facing changes on `main` under `Unreleased` in `CHANGELOG.md`, then assign those entries to the new version when preparing its release; purely internal changes without user impact do not necessarily require a changelog entry.
 - Verändere bestehendes Verhalten nur, wenn der Nutzer dies ausdrücklich beauftragt.
 - Committe oder pushe niemals ohne ausdrückliche Freigabe des Nutzers für die jeweilige Aktion.
 - Führe vor Änderungen zuerst passende Tests bzw. Prüfungen des Ist-Zustands durch und halte vorhandene Fehler fest.
