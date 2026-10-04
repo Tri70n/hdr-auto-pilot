@@ -5,6 +5,7 @@
 ### Fixed
 
 - Steam HDR Curator workaround entries no longer replace the PCGamingWiki source when they only confirm an existing `hackable` status; stronger Curator findings such as native HDR can still update the status and source.
+- Steam HDR Curator compatibility data now includes recommendations from all available result pages instead of only the first page.
 
 ## 0.4.20 - 2026-10-04
 

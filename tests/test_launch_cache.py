@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import runpy
 import sys
 import time
 import unittest
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -190,6 +192,80 @@ class CuratorPriorityTests(unittest.TestCase):
         self.assertEqual(result["hdr"], "true")
         self.assertEqual(result["source"], "PCGamingWiki")
         curator.assert_not_called()
+
+
+class CuratorPaginationTests(unittest.TestCase):
+    def make_plugin(self):
+        plugin = backend["Plugin"]()
+        plugin.steam_hdr_curator_cache = {}
+        return plugin
+
+    def response(self, start, total_count, recommendations):
+        results_html = "".join(
+            f'<a href="https://store.steampowered.com/app/{appid}/Game/" '
+            'class="recommendation_link">'
+            f'<div class="recommendation_desc">{description}</div>'
+            for appid, description in recommendations
+        )
+        return io.StringIO(json.dumps({
+            "start": str(start),
+            "pagesize": "100",
+            "total_count": total_count,
+            "results_html": results_html,
+        }))
+
+    def requested_starts(self, urlopen):
+        return [
+            int(urllib.parse.parse_qs(
+                urllib.parse.urlparse(call.args[0].full_url).query
+            )["start"][0])
+            for call in urlopen.call_args_list
+        ]
+
+    def test_fetch_merges_all_curator_pages(self):
+        plugin = self.make_plugin()
+        responses = (
+            self.response(0, 201, (("1", "Native support"),)),
+            self.response(100, 201, (("2", "Workaround"),)),
+            self.response(200, 201, (("3", "Windows Auto HDR"),)),
+        )
+        with patch("urllib.request.urlopen", side_effect=responses) as urlopen:
+            entries = plugin._fetch_steam_hdr_curator_sync()
+
+        self.assertEqual(set(entries), {"1", "2", "3"})
+        self.assertEqual(self.requested_starts(urlopen), [0, 100, 200])
+
+    def test_fetch_stops_at_exact_total_without_an_extra_request(self):
+        plugin = self.make_plugin()
+        responses = (
+            self.response(0, 200, (("1", "Native support"),)),
+            self.response(100, 200, (("2", "Workaround"),)),
+        )
+        with patch("urllib.request.urlopen", side_effect=responses) as urlopen:
+            entries = plugin._fetch_steam_hdr_curator_sync()
+
+        self.assertEqual(set(entries), {"1", "2"})
+        self.assertEqual(self.requested_starts(urlopen), [0, 100])
+
+    def test_later_page_failure_does_not_replace_the_existing_cache(self):
+        plugin = self.make_plugin()
+        previous_cache = {
+            "timestamp": 0,
+            "entries": {"old": {"status": "native"}},
+        }
+        plugin.steam_hdr_curator_cache = previous_cache
+        responses = (
+            self.response(0, 101, (("1", "Native support"),)),
+            OSError("second page failed"),
+        )
+        with patch("urllib.request.urlopen", side_effect=responses), patch.object(
+            plugin, "_save_steam_hdr_curator_cache"
+        ) as save:
+            with self.assertRaisesRegex(OSError, "second page failed"):
+                plugin._get_steam_hdr_curator_entries_sync()
+
+        self.assertEqual(plugin.steam_hdr_curator_cache, previous_cache)
+        save.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -318,35 +318,6 @@ class Plugin:
             "ajaxgetfilteredrecommendations/"
         )
 
-        params = urllib.parse.urlencode({
-            "query": "",
-            "start": 0,
-            "count": 100,
-            "dynamic_data": "",
-            "tagids": "",
-            "sort": "newest",
-        })
-
-        request = urllib.request.Request(
-            f"{base_url}?{params}",
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "application/json",
-            },
-        )
-
-        with urllib.request.urlopen(
-            request,
-            timeout=20,
-            context=_pcgw_ssl_context(),
-        ) as response:
-            data = json.load(response)
-
-        results_html = data.get(
-            "results_html",
-            "",
-        )
-
         pattern = re.compile(
             r'href="[^"]*/app/(\d+)/[^"]*" '
             r'class="recommendation_link">.*?'
@@ -356,49 +327,107 @@ class Plugin:
         )
 
         entries = {}
+        start = 0
+        count = 100
 
-        for appid, description in pattern.findall(
-            results_html
-        ):
-            description = re.sub(
-                r"<[^>]+>",
+        while True:
+            params = urllib.parse.urlencode({
+                "query": "",
+                "start": start,
+                "count": count,
+                "dynamic_data": "",
+                "tagids": "",
+                "sort": "newest",
+            })
+
+            request = urllib.request.Request(
+                f"{base_url}?{params}",
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                },
+            )
+
+            with urllib.request.urlopen(
+                request,
+                timeout=20,
+                context=_pcgw_ssl_context(),
+            ) as response:
+                data = json.load(response)
+
+            results_html = data.get(
+                "results_html",
                 "",
-                description,
-            )
-            description = html.unescape(
-                description
-            )
-            description = " ".join(
-                description.split()
             )
 
-            text = description.lower()
+            for appid, description in pattern.findall(
+                results_html
+            ):
+                description = re.sub(
+                    r"<[^>]+>",
+                    "",
+                    description,
+                )
+                description = html.unescape(
+                    description
+                )
+                description = " ".join(
+                    description.split()
+                )
+
+                text = description.lower()
+
+                if (
+                    "used to have native support" in text
+                    and "dropped" in text
+                ):
+                    status = "other"
+
+                elif (
+                    "native support" in text
+                    or "native suport" in text
+                ):
+                    status = "native"
+
+                elif "workaround" in text:
+                    status = "workaround"
+
+                elif "windows auto hdr" in text:
+                    status = "autohdr"
+
+                else:
+                    status = "other"
+
+                entries[appid] = {
+                    "status": status,
+                    "description": description,
+                }
+
+            try:
+                response_start = int(data["start"])
+                page_size = int(data["pagesize"])
+                total_count = int(data["total_count"])
+
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError(
+                    "Steam HDR Curator returned invalid pagination metadata"
+                ) from error
 
             if (
-                "used to have native support" in text
-                and "dropped" in text
+                response_start != start
+                or page_size <= 0
+                or total_count < 0
             ):
-                status = "other"
+                raise RuntimeError(
+                    "Steam HDR Curator returned invalid pagination metadata"
+                )
 
-            elif (
-                "native support" in text
-                or "native suport" in text
-            ):
-                status = "native"
+            next_start = response_start + page_size
 
-            elif "workaround" in text:
-                status = "workaround"
+            if next_start >= total_count:
+                break
 
-            elif "windows auto hdr" in text:
-                status = "autohdr"
-
-            else:
-                status = "other"
-
-            entries[appid] = {
-                "status": status,
-                "description": description,
-            }
+            start = next_start
 
         if not entries:
             raise RuntimeError(
