@@ -242,7 +242,7 @@ Version **0.4.20 supports regular Steam games with a valid Steam AppID only**.
 
 Games added to Steam as **Non-Steam games** are not currently supported. HDR compatibility lookup, PCGamingWiki links, library mini badges, and automatic HDR switching may therefore be unavailable or incomplete for these entries.
 
-Full Non-Steam game support is planned as a single, end-to-end development goal for version **0.4.21**.
+Full Non-Steam game support is planned as a single, end-to-end development goal for version **0.4.22**.
 
 ### Platform compatibility
 
