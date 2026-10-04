@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -266,6 +267,106 @@ class CuratorPaginationTests(unittest.TestCase):
 
         self.assertEqual(plugin.steam_hdr_curator_cache, previous_cache)
         save.assert_not_called()
+
+
+class HdrLookupDeduplicationTests(unittest.IsolatedAsyncioTestCase):
+    def make_plugin(self):
+        plugin = backend["Plugin"]()
+        plugin.cache = {}
+        return plugin
+
+    async def test_concurrent_lookup_is_shared_and_later_lookup_can_run(self):
+        plugin = self.make_plugin()
+        resolved = {
+            "appid": "391220",
+            "game": "Rise of the Tomb Raider",
+            "page": "Rise_of_the_Tomb_Raider",
+            "hdr": "hackable",
+        }
+        started = asyncio.Event()
+        release = asyncio.Event()
+        resolve_calls = 0
+
+        with patch.object(plugin, "_resolve_sync") as resolve, patch.object(
+            plugin,
+            "_apply_steam_hdr_curator_fallback_sync",
+            side_effect=lambda result: result,
+        ) as curator, patch.object(plugin, "_save_cache"), patch(
+            "asyncio.to_thread"
+        ) as to_thread:
+            async def run_in_thread(function, *args):
+                nonlocal resolve_calls
+                if function is resolve:
+                    resolve_calls += 1
+                    started.set()
+                    await release.wait()
+                    return dict(resolved)
+                return function(*args)
+
+            to_thread.side_effect = run_in_thread
+            first = asyncio.create_task(plugin.get_hdr_info("391220"))
+            await started.wait()
+            second = asyncio.create_task(plugin.get_hdr_info("391220"))
+            await asyncio.sleep(0)
+            release.set()
+            first_result, second_result = await asyncio.gather(first, second)
+
+            plugin.cache = {}
+            later_result = await plugin.get_hdr_info("391220")
+
+        self.assertEqual(first_result, second_result)
+        self.assertEqual(first_result["hdr"], "hackable")
+        self.assertFalse(first_result["cached"])
+        self.assertEqual(later_result["hdr"], "hackable")
+        self.assertEqual(resolve_calls, 2)
+        self.assertEqual(curator.call_count, 2)
+
+    async def test_failed_shared_lookup_is_removed_for_retry(self):
+        plugin = self.make_plugin()
+        resolved = {
+            "appid": "123",
+            "game": "Retry Game",
+            "page": "Retry_Game",
+            "hdr": "true",
+        }
+        started = asyncio.Event()
+        release = asyncio.Event()
+        resolve_calls = 0
+        fail = True
+
+        with patch.object(plugin, "_resolve_sync") as resolve, patch.object(
+            plugin,
+            "_apply_steam_hdr_curator_fallback_sync",
+            side_effect=lambda result: result,
+        ), patch.object(plugin, "_save_cache"), patch(
+            "asyncio.to_thread"
+        ) as to_thread:
+            async def run_in_thread(function, *args):
+                nonlocal resolve_calls
+                if function is resolve:
+                    resolve_calls += 1
+                    started.set()
+                    await release.wait()
+                    if fail:
+                        raise OSError("lookup failed")
+                    return dict(resolved)
+                return function(*args)
+
+            to_thread.side_effect = run_in_thread
+            first = asyncio.create_task(plugin.get_hdr_info("123"))
+            await started.wait()
+            second = asyncio.create_task(plugin.get_hdr_info("123"))
+            await asyncio.sleep(0)
+            release.set()
+            failures = await asyncio.gather(first, second, return_exceptions=True)
+
+            fail = False
+            retry = await plugin.get_hdr_info("123")
+
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(all(isinstance(error, OSError) for error in failures))
+        self.assertEqual(retry["hdr"], "true")
+        self.assertEqual(resolve_calls, 2)
 
 
 if __name__ == "__main__":

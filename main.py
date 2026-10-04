@@ -892,25 +892,53 @@ class Plugin:
                 True,
             )
 
-        result = await asyncio.to_thread(
-            self._resolve_sync,
-            appid,
+        inflight = getattr(
+            self,
+            "_hdr_info_inflight",
+            None,
         )
 
-        result = await asyncio.to_thread(
-            self._apply_steam_hdr_curator_fallback_sync,
-            result,
-        )
+        if not isinstance(inflight, dict):
+            inflight = {}
+            self._hdr_info_inflight = inflight
 
-        self._set_cached(
-            appid,
-            result,
-        )
+        task = inflight.get(appid)
 
-        return self._decorate_result(
-            result,
-            False,
-        )
+        if task is None:
+            async def resolve():
+                result = await asyncio.to_thread(
+                    self._resolve_sync,
+                    appid,
+                )
+
+                result = await asyncio.to_thread(
+                    self._apply_steam_hdr_curator_fallback_sync,
+                    result,
+                )
+
+                self._set_cached(
+                    appid,
+                    result,
+                )
+
+                return self._decorate_result(
+                    result,
+                    False,
+                )
+
+            task = asyncio.create_task(resolve())
+            inflight[appid] = task
+
+            def clear_inflight(completed):
+                if inflight.get(appid) is completed:
+                    inflight.pop(appid, None)
+
+                if not completed.cancelled():
+                    completed.exception()
+
+            task.add_done_callback(clear_inflight)
+
+        return await asyncio.shield(task)
 
     async def clear_cache(self):
         self.cache = {}
