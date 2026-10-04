@@ -4289,11 +4289,6 @@ function attachHdrMiniBadgeObserver(
     hdrMiniBadgeObservedDocument === doc &&
     hdrMiniBadgeObserver
   ) {
-    /*
-     * Cheap safety scan for Steam React remounts.
-     * Cached badges are restored immediately.
-     */
-    scanHdrMiniBadgeImages(doc);
     updateHdrMiniBadgeProgress();
     return;
   }

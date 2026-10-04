@@ -52,6 +52,17 @@ const compiled = ts.transpileModule(`${source}
         };
       },
     },
+    miniBadgeWatchdog: {
+      attach: attachHdrMiniBadgeObserver,
+      setDocument(doc) {
+        (globalThis as any).g_PopupManager = {
+          GetPopups: () => [{
+            m_strName: "SP Test",
+            m_popup: { document: doc },
+          }],
+        };
+      },
+    },
   };
 `, {
   fileName: "index.tsx",
@@ -105,6 +116,7 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   let cursor = 0;
   let effects = [];
   let cleanups = [];
+  const mutationObservers = [];
 
   const react = {
     useState(initial) {
@@ -219,6 +231,10 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
     },
   };
   class MutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      mutationObservers.push(this);
+    }
     observe() {}
     disconnect() {}
   }
@@ -292,6 +308,12 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
     beginCacheClear: () => runtime.beginHdrCacheClear(),
     stopLaunchRuntime: () => runtime.stopSteamLaunchRuntime(),
     miniBadgeToast: runtime.miniBadgeToast,
+    miniBadgeWatchdog: {
+      ...runtime.miniBadgeWatchdog,
+      mutate(records) {
+        mutationObservers.at(-1)?.callback(records);
+      },
+    },
     changeUiMode: (mode) => uiModeHandler?.(mode),
     uiModeUnregisters: () => uiModeUnregisters,
     loadPlugin: () => context.exports.default(),
@@ -826,6 +848,87 @@ test("stopping mini-badge runtime invalidates a pending queue lookup", async () 
   });
   assert.equal(h.domQueries.includes("img"), false);
   assert.equal(h.toastMessages.length, toastCountAfterStop);
+});
+
+test("mini-badge watchdog does not rescan the same observed document", () => {
+  const h = createHarness(true);
+  const queries = [];
+  const doc = {
+    body: {},
+    querySelectorAll(selector) {
+      queries.push(selector);
+      return [];
+    },
+  };
+
+  h.miniBadgeWatchdog.setDocument(doc);
+  h.miniBadgeWatchdog.attach(true);
+  h.miniBadgeWatchdog.attach();
+
+  assert.equal(queries.filter((selector) => selector === "img").length, 1);
+});
+
+test("mini-badge watchdog scans a replacement popup document", () => {
+  const h = createHarness(true);
+  const documents = [[], []].map((queries) => ({
+    body: {},
+    queries,
+    querySelectorAll(selector) {
+      queries.push(selector);
+      return [];
+    },
+  }));
+
+  h.miniBadgeWatchdog.setDocument(documents[0]);
+  h.miniBadgeWatchdog.attach(true);
+  h.miniBadgeWatchdog.setDocument(documents[1]);
+  h.miniBadgeWatchdog.attach();
+
+  assert.deepEqual(
+    documents.map(({ queries }) => queries.filter((selector) => selector === "img").length),
+    [1, 1],
+  );
+});
+
+test("mini-badge observer still handles added images and src changes", async () => {
+  const h = createHarness(true, undefined, {
+    networkResult: {
+      appid: "1",
+      hdr: "true",
+      automatic_action: "enable",
+      cached: true,
+    },
+  });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: false,
+    total: 2,
+    targetIds: ["1", "2"],
+    queue: [],
+    queueRunning: false,
+  });
+  const doc = { body: {}, querySelectorAll: () => [] };
+  const image = {
+    nodeType: 1,
+    tagName: "IMG",
+    src: "https://cdn.cloudflare.steamstatic.com/steam/apps/1/library_600x900.jpg",
+  };
+
+  h.miniBadgeWatchdog.setDocument(doc);
+  h.miniBadgeWatchdog.attach(true);
+  h.miniBadgeWatchdog.mutate([{
+    type: "childList",
+    addedNodes: [image],
+  }]);
+  image.src = "https://cdn.cloudflare.steamstatic.com/steam/apps/2/library_600x900.jpg";
+  h.miniBadgeWatchdog.mutate([{
+    type: "attributes",
+    attributeName: "src",
+    target: image,
+  }]);
+  await flush();
+
+  assert.deepEqual(h.networkCalls, ["1", "2"]);
 });
 
 test("entering Game Mode during a running preload shows the start toast", async () => {

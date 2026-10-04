@@ -8,6 +8,7 @@
 - Steam HDR Curator compatibility data now includes recommendations from all available result pages instead of only the first page.
 - Concurrent HDR metadata requests for the same game now share one lookup instead of starting duplicate network resolutions.
 - Stopping the plugin now invalidates pending mini-badge work so it cannot restore badge or progress state after unload.
+- The mini-badge watchdog no longer rescans every image in an unchanged Steam popup twice per second.
 
 ## 0.4.20 - 2026-10-04
 
