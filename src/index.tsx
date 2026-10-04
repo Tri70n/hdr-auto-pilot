@@ -183,6 +183,21 @@ function getSteamWebpackRequire(): any | null {
 
 let runtimeAutoHdrEnabled = false;
 
+let savedAutoHdrEnabled = false;
+let autoHdrChangeRevision = 0;
+let autoHdrSaveQueue: Promise<void> = Promise.resolve();
+
+const autoHdrSubscribers =
+  new Set<(enabled: boolean) => void>();
+
+function updateRuntimeAutoHdr(enabled: boolean) {
+  runtimeAutoHdrEnabled = enabled;
+
+  for (const subscriber of autoHdrSubscribers) {
+    subscriber(enabled);
+  }
+}
+
 let runtimeMiniBadgesEnabled = true;
 let runtimeMiniBadgesLibraryEnabled = true;
 let runtimeMiniBadgesHomeEnabled = true;
@@ -222,8 +237,11 @@ async function refreshRuntimeHdrSettings() {
     const settings =
       await getSettings();
 
-    runtimeAutoHdrEnabled =
-      !!settings.auto_hdr_enabled;
+    // Initial reads must not overwrite a more recent toggle.
+    if (autoHdrChangeRevision === 0) {
+      savedAutoHdrEnabled = !!settings.auto_hdr_enabled;
+      updateRuntimeAutoHdr(savedAutoHdrEnabled);
+    }
 
     runtimeMiniBadgesEnabled =
       settings.mini_badges_enabled !== false;
@@ -255,7 +273,9 @@ async function refreshRuntimeHdrSettings() {
       e
     );
 
-    runtimeAutoHdrEnabled = false;
+    if (autoHdrChangeRevision === 0) {
+      updateRuntimeAutoHdr(false);
+    }
     runtimeHdrOverrideAppIds.clear();
   }
 }
@@ -4538,7 +4558,7 @@ function Content() {
     settings,
     setSettings,
   ] = useState<PluginSettings>({
-    auto_hdr_enabled: false,
+    auto_hdr_enabled: runtimeAutoHdrEnabled,
     restore_previous_hdr_state: true,
     mini_badges_enabled: true,
     mini_badges_library_enabled: true,
@@ -4554,12 +4574,30 @@ function Content() {
       useEffect(() => {
     let active = true;
 
+    const updateAutoHdr = (enabled: boolean) => {
+      setSettings((current) => ({
+        ...current,
+        auto_hdr_enabled: enabled,
+      }));
+    };
+
+    // Keep a reopened panel in sync with saves started by the previous panel.
+    autoHdrSubscribers.add(updateAutoHdr);
+
     const load = async () => {
       try {
         const saved = await getSettings();
 
         if (active) {
-          setSettings(saved);
+          if (autoHdrChangeRevision === 0) {
+            savedAutoHdrEnabled = !!saved.auto_hdr_enabled;
+            updateRuntimeAutoHdr(savedAutoHdrEnabled);
+          }
+
+          setSettings({
+            ...saved,
+            auto_hdr_enabled: runtimeAutoHdrEnabled,
+          });
           setSettingsLoaded(true);
         }
 
@@ -4579,51 +4617,55 @@ function Content() {
 
     return () => {
       active = false;
+      autoHdrSubscribers.delete(updateAutoHdr);
     };
   }, []);
 
 
   const changeAutoHdr =
     async (enabled: boolean) => {
-      const previous =
-        settings.auto_hdr_enabled;
+      const revision = ++autoHdrChangeRevision;
+      updateRuntimeAutoHdr(enabled);
 
-      setSettings((current) => ({
-        ...current,
-        auto_hdr_enabled: enabled,
-      }));
+      const save = async () => {
+        try {
+          const saved =
+            await setAutoHdrEnabled(enabled);
 
-      try {
-        const saved =
-          await setAutoHdrEnabled(
-            enabled
+          savedAutoHdrEnabled = !!saved.auto_hdr_enabled;
+
+          if (revision === autoHdrChangeRevision) {
+            updateRuntimeAutoHdr(savedAutoHdrEnabled);
+          }
+
+          toaster.toast({
+            title: "HDR Auto Pilot",
+            body: enabled
+              ? "Automatic HDR switching enabled"
+              : "Automatic HDR switching disabled",
+          });
+
+        } catch (e) {
+          console.error(
+            "Could not save Auto HDR setting:",
+            e
           );
 
-        setSettings(saved);
+          if (revision === autoHdrChangeRevision) {
+            updateRuntimeAutoHdr(savedAutoHdrEnabled);
+          }
 
-        toaster.toast({
-          title: "HDR Auto Pilot",
-          body: enabled
-            ? "Automatic HDR switching enabled"
-            : "Automatic HDR switching disabled",
-        });
+          toaster.toast({
+            title: "HDR Auto Pilot",
+            body: "Could not save setting",
+          });
+        }
+      };
 
-      } catch (e) {
-        console.error(
-          "Could not save Auto HDR setting:",
-          e
-        );
-
-        setSettings((current) => ({
-          ...current,
-          auto_hdr_enabled: previous,
-        }));
-
-        toaster.toast({
-          title: "HDR Auto Pilot",
-          body: "Could not save setting",
-        });
-      }
+      // Persist clicks in order; older replies cannot undo a newer choice.
+      const pending = autoHdrSaveQueue.then(save, save);
+      autoHdrSaveQueue = pending;
+      await pending;
     };
 
 
@@ -4643,7 +4685,10 @@ function Content() {
             enabled
           );
 
-        setSettings(saved);
+        setSettings({
+          ...saved,
+          auto_hdr_enabled: runtimeAutoHdrEnabled,
+        });
 
       } catch (e) {
         console.error(
@@ -4692,7 +4737,10 @@ function Content() {
           removeAllHdrMiniBadges();
         }
 
-        setSettings(saved);
+        setSettings({
+          ...saved,
+          auto_hdr_enabled: runtimeAutoHdrEnabled,
+        });
 
       } catch (e) {
         console.error(
@@ -4735,7 +4783,10 @@ function Content() {
         removeAllHdrMiniBadges();
         refreshHdrMiniBadges();
 
-        setSettings(saved);
+        setSettings({
+          ...saved,
+          auto_hdr_enabled: runtimeAutoHdrEnabled,
+        });
 
       } catch (e) {
         console.error(
@@ -4779,7 +4830,10 @@ function Content() {
         removeAllHdrMiniBadges();
         refreshHdrMiniBadges();
 
-        setSettings(saved);
+        setSettings({
+          ...saved,
+          auto_hdr_enabled: runtimeAutoHdrEnabled,
+        });
 
       } catch (e) {
         console.error(

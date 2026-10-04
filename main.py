@@ -163,8 +163,13 @@ class Plugin:
         return dict(self.settings)
 
     async def set_auto_hdr_enabled(self, enabled: bool):
+        previous = self.settings["auto_hdr_enabled"]
         self.settings["auto_hdr_enabled"] = bool(enabled)
-        self._save_settings()
+        try:
+            self._save_settings()
+        except Exception:
+            self.settings["auto_hdr_enabled"] = previous
+            raise
 
         decky.logger.info(
             "Automatic HDR switching manually set to: %s",
