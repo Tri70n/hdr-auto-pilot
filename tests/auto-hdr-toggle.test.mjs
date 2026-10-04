@@ -14,6 +14,33 @@ const compiled = ts.transpileModule(`${source}
     beginHdrCacheClear: typeof beginHdrCacheClear === "function"
       ? beginHdrCacheClear
       : () => pcgwLaunchCache.clear(),
+    miniBadgeToast: {
+      reset({ gamepadUiActive, networkActive, total, targetIds, queue, queueRunning }) {
+        hdrMiniBadgeGamepadUiActive = gamepadUiActive;
+        hdrMiniBadgeNotifyNetworkActive = networkActive;
+        hdrMiniBadgeNotifyTotal = total;
+        hdrMiniBadgeNotifyStartShown = false;
+        hdrMiniBadgeTargetIds.clear();
+        for (const appid of targetIds) hdrMiniBadgeTargetIds.add(appid);
+        hdrMiniBadgeQueue.length = 0;
+        hdrMiniBadgeQueue.push(...queue);
+        hdrMiniBadgeQueueRunning = queueRunning;
+        hdrMiniBadgeQueuedIds.clear();
+        hdrMiniBadgeCompletedIds.clear();
+      },
+      setWorkerState(queue, queueRunning) {
+        hdrMiniBadgeQueue.length = 0;
+        hdrMiniBadgeQueue.push(...queue);
+        hdrMiniBadgeQueueRunning = queueRunning;
+      },
+      setNetworkActive(active) {
+        hdrMiniBadgeNotifyNetworkActive = active;
+      },
+      show: showHdrMiniBadgeLoadingToast,
+      update: updateHdrMiniBadgeProgress,
+      queueApp: queueHdrMiniBadgeApp,
+      startUiModeTracking: startHdrMiniBadgeUiModeTracking,
+    },
   };
 `, {
   fileName: "index.tsx",
@@ -56,8 +83,11 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   const saves = [];
   const hdrWrites = [];
   const toasts = [];
+  const toastMessages = [];
   const cacheOnlyCalls = [];
   const networkCalls = [];
+  let uiModeHandler;
+  let uiModeUnregisters = 0;
   let reads = 0;
   let slots = [];
   let cursor = 0;
@@ -90,10 +120,23 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "Fragment" },
     "react-dom": {},
     "react-icons/fa": {},
-    "@decky/ui": { DialogButton: { render: () => ({ type: "button" }) } },
+    "@decky/ui": {
+      DialogButton: { render: () => ({ type: "button" }) },
+      staticClasses: { Title: "title" },
+    },
     "@decky/api": {
       definePlugin: (factory) => factory,
-      toaster: { toast: (message) => toasts.push(message.body) },
+      routerHook: {
+        addPatch: () => ({}),
+        removePatch() {},
+      },
+      toaster: {
+        toast: (message) => {
+          toastMessages.push(message);
+          toasts.push(message.body);
+          return { data: message, dismiss() {} };
+        },
+      },
       callable: (name) => (...args) => {
         if (name === "get_cached_hdr_info") {
           const [appid] = args;
@@ -108,6 +151,9 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
         }
         if (name === "get_hdr_info") {
           networkCalls.push(args[0]);
+          if (options.networkResult) {
+            return Promise.resolve(options.networkResult);
+          }
           return Promise.reject(new Error("network lookup forbidden on launch path"));
         }
         if (name === "get_settings") {
@@ -143,6 +189,24 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
       },
     },
   };
+  const steamClient = {
+    UI: {
+      GetUIMode: () => Promise.resolve(options.uiMode ?? 4),
+      RegisterForUIModeChanged: (handler) => {
+        uiModeHandler = handler;
+        return {
+          unregister() {
+            uiModeUnregisters += 1;
+            uiModeHandler = undefined;
+          },
+        };
+      },
+    },
+  };
+  class MutationObserver {
+    observe() {}
+    disconnect() {}
+  }
   const context = {
     exports: {},
     require(name) {
@@ -150,8 +214,18 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
       return imports[name];
     },
     console: { log() {}, warn() {}, error() {} },
-    document: { querySelectorAll: () => [] },
+    document: { body: {}, querySelectorAll: () => [] },
+    MutationObserver,
+    SteamClient: steamClient,
     window: {
+      SteamClient: steamClient,
+      location: { pathname: "/routes/library/home" },
+      setInterval: () => 1,
+      clearInterval() {},
+      setTimeout: (callback) => {
+        callback();
+        return 1;
+      },
       settingsStore: { clientSettings: { gamescope_hdr_enabled: false } },
       webpackChunksteamui: {
         push([, , initialize]) {
@@ -174,7 +248,7 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
   }
 
   return {
-    saves, toasts, initialSettings, cacheOnlyCalls, networkCalls, hdrWrites,
+    saves, toasts, toastMessages, initialSettings, cacheOnlyCalls, networkCalls, hdrWrites,
     get persisted() { return persisted; },
     initialize: () => runtime.refreshRuntimeHdrSettings(),
     async mount() {
@@ -196,6 +270,10 @@ function createHarness(initialEnabled, initialRuntimeRead, options = {}) {
     setLaunchCache: (appid, info) => runtime.pcgwLaunchCache.set(appid, info),
     beginCacheClear: () => runtime.beginHdrCacheClear(),
     stopLaunchRuntime: () => runtime.stopSteamLaunchRuntime(),
+    miniBadgeToast: runtime.miniBadgeToast,
+    changeUiMode: (mode) => uiModeHandler?.(mode),
+    uiModeUnregisters: () => uiModeUnregisters,
+    loadPlugin: () => context.exports.default(),
     cachedLaunchInfo: (appid) => runtime.pcgwLaunchCache.get(appid),
     exitApp: async (appid) => {
       runtime.handleAppLifetimeNotification({ unAppID: Number(appid), bRunning: false });
@@ -592,4 +670,189 @@ test("a frontend cache entry completed during the local RPC is used immediately"
   await launch;
   assert.deepEqual(h.hdrWrites, [["gamescope_hdr_enabled", true]]);
   assert.deepEqual(h.networkCalls, []);
+});
+
+test("mini-badge preload shows fixed start and completion toasts only at worker completion", () => {
+  const h = createHarness(true);
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: true,
+    total: 3,
+    targetIds: ["1", "2", "3"],
+    queue: ["2", "3"],
+    queueRunning: true,
+  });
+
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.setWorkerState(["3"], false);
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.setWorkerState([], true);
+  h.miniBadgeToast.update();
+  assert.deepEqual(h.toastMessages.map(({ body, duration }) => ({ body, duration })), [
+    { body: "Loading HDR data for 3 games", duration: 5000 },
+  ]);
+
+  h.miniBadgeToast.setWorkerState([], false);
+  h.miniBadgeToast.update();
+  assert.deepEqual(h.toastMessages.map(({ body, duration }) => ({ body, duration })), [
+    { body: "Loading HDR data for 3 games", duration: 5000 },
+    { body: "HDR data loaded for 3 games", duration: 4500 },
+  ]);
+});
+
+test("mini-badge preload remains toast-free in Desktop Mode", () => {
+  const h = createHarness(true);
+  h.miniBadgeToast.reset({
+    gamepadUiActive: false,
+    networkActive: true,
+    total: 2,
+    targetIds: ["1", "2"],
+    queue: ["2"],
+    queueRunning: true,
+  });
+
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.setWorkerState([], false);
+  h.miniBadgeToast.update();
+  assert.deepEqual(h.toastMessages, []);
+});
+
+test("cache-only mini-badge queue work does not show network progress toasts", async () => {
+  const h = createHarness(true, undefined, {
+    networkResult: {
+      appid: "1",
+      hdr: "true",
+      automatic_action: "enable",
+      cached: true,
+    },
+  });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: false,
+    total: 1,
+    targetIds: ["1"],
+    queue: [],
+    queueRunning: false,
+  });
+
+  h.miniBadgeToast.queueApp("1");
+  await flush();
+  assert.deepEqual(h.toastMessages, []);
+  assert.deepEqual(h.networkCalls, ["1"]);
+});
+
+test("mini-badge network queue work drives the start and completion toasts", async () => {
+  const h = createHarness(true, undefined, {
+    networkResult: {
+      appid: "1",
+      hdr: "true",
+      automatic_action: "enable",
+      cached: false,
+    },
+  });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: false,
+    total: 1,
+    targetIds: ["1"],
+    queue: [],
+    queueRunning: false,
+  });
+
+  h.miniBadgeToast.queueApp("1");
+  await flush();
+  assert.deepEqual(h.toasts, [
+    "Loading HDR data for 1 game",
+    "HDR data loaded for 1 game",
+  ]);
+  assert.deepEqual(h.networkCalls, ["1"]);
+});
+
+test("entering Game Mode during a running preload shows the start toast", async () => {
+  const h = createHarness(true, undefined, { uiMode: 7 });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: false,
+    networkActive: true,
+    total: 4,
+    targetIds: ["1", "2", "3", "4"],
+    queue: ["2", "3", "4"],
+    queueRunning: true,
+  });
+
+  h.miniBadgeToast.startUiModeTracking();
+  await flush();
+  assert.deepEqual(h.toastMessages, []);
+  h.changeUiMode(4);
+  assert.deepEqual(h.toastMessages.map(({ body, duration }) => ({ body, duration })), [
+    { body: "Loading HDR data for 4 games", duration: 5000 },
+  ]);
+});
+
+test("leaving Game Mode during a running preload suppresses the completion toast", async () => {
+  const h = createHarness(true, undefined, { uiMode: 4 });
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: true,
+    total: 2,
+    targetIds: ["1", "2"],
+    queue: ["2"],
+    queueRunning: true,
+  });
+
+  h.miniBadgeToast.startUiModeTracking();
+  await flush();
+  h.miniBadgeToast.update();
+  h.changeUiMode(7);
+  h.miniBadgeToast.setWorkerState([], false);
+  h.miniBadgeToast.update();
+
+  assert.deepEqual(h.toasts, ["Loading HDR data for 2 games"]);
+});
+
+test("a completed mini-badge preload allows a later preload to notify again", () => {
+  const h = createHarness(true);
+  h.miniBadgeToast.reset({
+    gamepadUiActive: true,
+    networkActive: true,
+    total: 1,
+    targetIds: ["1"],
+    queue: ["1"],
+    queueRunning: true,
+  });
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.setWorkerState([], false);
+  h.miniBadgeToast.update();
+
+  h.miniBadgeToast.setNetworkActive(true);
+  h.miniBadgeToast.setWorkerState(["1"], true);
+  h.miniBadgeToast.update();
+  h.miniBadgeToast.setWorkerState([], false);
+  h.miniBadgeToast.update();
+
+  assert.deepEqual(h.toasts, [
+    "Loading HDR data for 1 game",
+    "HDR data loaded for 1 game",
+    "Loading HDR data for 1 game",
+    "HDR data loaded for 1 game",
+  ]);
+});
+
+test("plugin dismount unregisters mini-badge UI mode tracking", () => {
+  const h = createHarness(true);
+  const plugin = h.loadPlugin();
+  assert.equal(h.uiModeUnregisters(), 0);
+  plugin.onDismount();
+  assert.equal(h.uiModeUnregisters(), 1);
+
+  h.miniBadgeToast.reset({
+    gamepadUiActive: false,
+    networkActive: true,
+    total: 1,
+    targetIds: ["1"],
+    queue: ["1"],
+    queueRunning: true,
+  });
+  h.changeUiMode(4);
+  assert.deepEqual(h.toastMessages, []);
 });

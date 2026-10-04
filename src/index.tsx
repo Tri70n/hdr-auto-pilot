@@ -1359,7 +1359,6 @@ function PcgwLibraryWarmupStatus() {
              * Reuse the existing target snapshot here. Do not rediscover the
              * library, restart observers, or add any startup work.
              */
-            dismissHdrMiniBadgeLoadingToast();
             hdrMiniBadgeQueue.length = 0;
             hdrMiniBadgeQueuedIds.clear();
             hdrMiniBadgeCompletedIds.clear();
@@ -3181,7 +3180,6 @@ let hdrMiniBadgeLibraryRefreshPending = false;
 
 let hdrMiniBadgeNotifyNetworkActive = false;
 let hdrMiniBadgeNotifyTotal = 0;
-let hdrMiniBadgeLoadingToast: ReturnType<typeof toaster.toast> | null = null;
 
 let hdrMiniBadgeLibrarySubscriber:
   (() => void) | null = null;
@@ -3675,23 +3673,6 @@ async function getHdrAllSteamLibraryIds():
   return [];
 }
 
-
-function dismissHdrMiniBadgeLoadingToast() {
-  if (!hdrMiniBadgeLoadingToast) {
-    return;
-  }
-
-  try {
-    hdrMiniBadgeLoadingToast.dismiss();
-  } catch (e) {
-    console.warn(
-      "Decky HDR: could not dismiss loading toast",
-      e
-    );
-  }
-
-  hdrMiniBadgeLoadingToast = null;
-}
 
 let hdrMiniBadgeNotifyStartShown = false;
 let hdrMiniBadgeGamepadUiActive = true;
@@ -4418,8 +4399,6 @@ if (
 
   hdrMiniBadgeLibraryRefreshPending =
     false;
-
-  dismissHdrMiniBadgeLoadingToast();
 
   hdrMiniBadgeNotifyNetworkActive =
     false;
