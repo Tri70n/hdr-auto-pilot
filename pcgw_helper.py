@@ -76,19 +76,6 @@ def get_steam_game_name(appid: str) -> str:
     ).strip()
 
 
-PACKAGING_SUFFIXES = (
-    r"game\s+of\s+the\s+year(?:\s+edition)?",
-    r"goty(?:\s+edition)?",
-    r"complete(?:\s+edition)?",
-    r"deluxe(?:\s+edition)?",
-    r"ultimate(?:\s+edition)?",
-    r"gold(?:\s+edition)?",
-    r"premium(?:\s+edition)?",
-    r"special(?:\s+edition)?",
-    r"collector'?s(?:\s+edition)?",
-)
-
-
 def normalize_title(title: str) -> str:
     title = title.casefold()
 
@@ -126,8 +113,11 @@ def title_search_variants(game_name: str) -> list[str]:
 
     # Generic search backoff:
     # progressively shorten the title from the end.
-    # These variants only discover candidates.
-    # The Steam AppID check decides whether a page is accepted.
+    # Queries are tried in order. Within each query, an exact
+    # normalized match to the full game title wins first, followed,
+    # when an AppID is available, by a page whose wikitext mentions it.
+    # If no query returns a page, the best accumulated title-similarity
+    # match may be accepted if it meets the threshold.
     while len(words) > 1:
         words = words[:-1]
         add(" ".join(words))
