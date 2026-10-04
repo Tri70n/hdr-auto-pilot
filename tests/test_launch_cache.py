@@ -1,3 +1,5 @@
+import json
+import os
 import runpy
 import sys
 import time
@@ -84,6 +86,60 @@ class LaunchCacheTests(unittest.IsolatedAsyncioTestCase):
                 plugin = self.make_plugin({"123": self.entry(result_data)})
                 result = await plugin.get_cached_hdr_info("123")
                 self.assertEqual(result["automatic_action"], "disable")
+
+    def test_resolve_sync_invokes_the_isolated_pcgw_helper(self):
+        plugin = self.make_plugin({})
+        resolved = {
+            "appid": "123",
+            "game": "Helper Game",
+            "page": "Helper_Game",
+            "hdr": "true",
+        }
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(resolved),
+            stderr="",
+        )
+        root = Path(__file__).resolve().parents[1]
+        helper = root / "pcgw_helper.py"
+        sanitized_variables = (
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "LD_AUDIT",
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "PYTHONEXECUTABLE",
+            "PYTHONUSERBASE",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+        )
+        inherited_environment = {
+            variable: "must-not-reach-helper" for variable in sanitized_variables
+        }
+        inherited_environment["HOME"] = "/home/test-user"
+
+        with patch.dict(os.environ, inherited_environment), patch(
+            "shutil.which", return_value="/usr/bin/python3"
+        ) as which, patch("subprocess.run", return_value=completed) as subprocess_run, patch(
+            "urllib.request.urlopen"
+        ) as urlopen:
+            result = plugin._resolve_sync(" 123 ")
+
+        self.assertEqual(result, resolved)
+        which.assert_called_once_with(
+            "python3",
+            path="/usr/local/bin:/usr/bin:/bin",
+        )
+        subprocess_run.assert_called_once()
+        command = subprocess_run.call_args.args[0]
+        options = subprocess_run.call_args.kwargs
+        self.assertEqual(command, ["/usr/bin/python3", "-I", str(helper), "123"])
+        self.assertEqual(options["cwd"], str(root))
+        self.assertEqual(options["env"]["PATH"], "/usr/local/bin:/usr/bin:/bin")
+        self.assertEqual(options["env"]["HOME"], "/home/test-user")
+        for variable in sanitized_variables:
+            self.assertNotIn(variable, options["env"])
+        urlopen.assert_not_called()
 
 
 if __name__ == "__main__":
