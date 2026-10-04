@@ -47,7 +47,7 @@ timeout --signal=TERM --kill-after=10s 600s claude -p "$REVIEW_PROMPT" \
 
 ## Actual execution paths
 - `src/index.tsx` contains the frontend and plugin-wide runtimes. Start/stop subscriptions and patches in `definePlugin` / `onDismount`, not in the settings panel lifecycle: launch handling must survive closing the panel.
-- The real backend is `main.py`'s `Plugin`, reached through named `callable` RPCs in `src/index.tsx`. Keep RPC names, argument order, and frontend result/settings types aligned. `backend/` is a C Hello World scaffold, not the HDR backend; `decky.pyi` is only a typing stub for the host-provided module.
+- The real backend is `main.py`'s `Plugin`, reached through named `callable` RPCs in `src/index.tsx`. Keep RPC names, argument order, and frontend result/settings types aligned. `decky.pyi` is only a typing stub for the host-provided module.
 - Active PCGamingWiki resolution is `get_hdr_info` → `_resolve_sync` → `pcgw_helper.py`, despite older lookup/parser methods also present in `main.py`. Preserve the helper's system Python `-I` invocation and environment sanitization: inherited Decky Python/loader variables can break HTTPS. Helper stdout must remain JSON; diagnostics go to stderr.
 - Settings live under `decky.DECKY_PLUGIN_SETTINGS_DIR`; compatibility and curator caches live under `decky.DECKY_PLUGIN_RUNTIME_DIR`, not the source tree.
 
